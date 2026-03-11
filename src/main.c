@@ -346,6 +346,17 @@ static void update_sidebar_labels(AppState *s)
 
 /* ── GL area callbacks ─────────────────────────────────────────── */
 
+static void on_unrealize(GtkGLArea *area, gpointer data)
+{
+    (void)data;
+    AppState *s = &app_state;
+    gtk_gl_area_make_current(area);
+    if (s->gl_initialized) {
+        renderer_destroy(&s->renderer);
+        s->gl_initialized = 0;
+    }
+}
+
 static void on_realize(GtkGLArea *area, gpointer data)
 {
     (void)data;
@@ -1077,6 +1088,16 @@ static void on_drap_toggle(GtkToggleButton *btn, gpointer data)
     }
 }
 
+static void on_qrz_btn_destroy(GtkWidget *btn, gpointer data)
+{
+    (void)btn;
+    AppState *s = data;
+    if (s->qrz_popover) {
+        gtk_widget_unparent(s->qrz_popover);
+        s->qrz_popover = NULL;
+    }
+}
+
 static void on_qrz_activate(GtkEntry *entry, gpointer data)
 {
     AppState *s = (AppState *)data;
@@ -1187,6 +1208,7 @@ static void activate(GtkApplication *app, gpointer user_data)
     gtk_widget_set_focusable(s->gl_area, TRUE);
 
     g_signal_connect(s->gl_area, "realize", G_CALLBACK(on_realize), NULL);
+    g_signal_connect(s->gl_area, "unrealize", G_CALLBACK(on_unrealize), NULL);
     g_signal_connect(s->gl_area, "render", G_CALLBACK(on_render), NULL);
     g_signal_connect(s->gl_area, "resize", G_CALLBACK(on_resize), NULL);
 
@@ -1287,6 +1309,7 @@ static void activate(GtkApplication *app, gpointer user_data)
     g_signal_connect(s->qrz_entry, "activate", G_CALLBACK(on_qrz_activate), s);
     g_signal_connect_swapped(s->btn_qrz, "clicked",
                               G_CALLBACK(gtk_popover_popup), s->qrz_popover);
+    g_signal_connect(s->btn_qrz, "destroy", G_CALLBACK(on_qrz_btn_destroy), s);
 
     GtkWidget *src_sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_add_css_class(src_sep, "btn-sep");
@@ -1405,7 +1428,6 @@ static void on_shutdown(GtkApplication *app, gpointer data)
     if (s->solar_fetching) fetch_cleanup(&s->solar_fetch);
 
     if (s->has_qrz) qrz_cleanup();
-    if (s->gl_initialized) renderer_destroy(&s->renderer);
     map_data_free(&s->map);
     if (s->has_borders) map_data_free(&s->borders);
     if (s->has_land) map_data_free(&s->land);
