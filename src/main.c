@@ -816,10 +816,16 @@ static void on_proj_toggle(GtkToggleButton *btn, gpointer data)
 
     gtk_gl_area_make_current(GTK_GL_AREA(s->gl_area));
 
-    if (gtk_toggle_button_get_active(btn))
+    if (gtk_toggle_button_get_active(btn)) {
         projection_set_mode(PROJ_ORTHO);
-    else
+    } else {
         projection_set_mode(PROJ_AZEQ);
+        /* Reset view (same as pressing R) */
+        camera_reset(&s->cam);
+        s->input.center_lat = s->input.original_center_lat;
+        s->input.center_lon = s->input.original_center_lon;
+        projection_set_center(s->input.center_lat, s->input.center_lon);
+    }
 
     renderer_upload_earth_circle(&s->renderer, projection_get_radius());
     reproject_all(s);
@@ -834,7 +840,15 @@ static void on_proj_toggle(GtkToggleButton *btn, gpointer data)
     grid_build_dist_circles(&s->dist_circles, s->qth_lat, s->qth_lon);
     renderer_upload_dist_circles(&s->renderer, &s->dist_circles);
 
-    s->last_sun_update = 0;
+    /* Rebuild night overlay for new projection */
+    {
+        time_t now = time(NULL);
+        s->last_sun_update = now;
+        SubsolarPoint sun = solar_subsolar_point(now);
+        nightmesh_build(&s->nightmesh, &sun);
+        renderer_upload_night(&s->renderer, s->nightmesh.vertices,
+                              s->nightmesh.vertex_count);
+    }
     /* Reproject overlays */
     if (s->muf_active && s->muf_data.raw_count > 0) {
         muf_reproject(&s->muf_data);
@@ -987,7 +1001,7 @@ static void load_css(void)
     GtkCssProvider *provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(provider,
         "window { background-color: #0d0d1e; }"
-        ".sidebar { background-color: #10101a; padding: 12px; }"
+        ".sidebar { background-color: #10101a; padding: 12px; padding-bottom: 5px; }"
         ".sidebar label { color: #b3cce6; font-family: monospace; font-size: 13px; }"
         ".sidebar .clock { font-size: 16px; font-weight: bold; color: #ddeeff; }"
         ".sidebar .section-label { font-size: 11px; color: #667788; margin-top: 8px; }"
@@ -998,6 +1012,7 @@ static void load_css(void)
         "  font-family: monospace; min-height: 24px; }"
         ".sidebar button:hover { background-color: #252540; border-color: #558; }"
         ".sidebar button:checked { background-color: #2a4570; border-color: #4a7ab5; color: #fff; }"
+        ".btn-sep { background-color: #ffffff; min-height: 1px; margin: 6px 0; }"
         ".map-area { background-color: #0d0d1e; }"
     );
     gtk_style_context_add_provider_for_display(
@@ -1099,8 +1114,9 @@ static void activate(GtkApplication *app, gpointer user_data)
     gtk_box_append(GTK_BOX(sidebar), src_label);
 
     /* QRZ button + popover */
-    GtkWidget *src_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    GtkWidget *src_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_widget_set_halign(src_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(src_box, SIDEBAR_WIDTH / 2, -1);
     gtk_box_append(GTK_BOX(sidebar), src_box);
 
     s->btn_qrz = gtk_button_new_with_label("QRZ");
@@ -1116,7 +1132,11 @@ static void activate(GtkApplication *app, gpointer user_data)
     g_signal_connect_swapped(s->btn_qrz, "clicked",
                               G_CALLBACK(gtk_popover_popup), s->qrz_popover);
 
-    gtk_box_append(GTK_BOX(sidebar), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    GtkWidget *src_sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_widget_add_css_class(src_sep, "btn-sep");
+    gtk_widget_set_halign(src_sep, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(src_sep, SIDEBAR_WIDTH * 3 / 4, -1);
+    gtk_box_append(GTK_BOX(sidebar), src_sep);
 
     /* LAYERS section */
     GtkWidget *layers_label = gtk_label_new("LAYERS");
@@ -1124,6 +1144,8 @@ static void activate(GtkApplication *app, gpointer user_data)
     gtk_box_append(GTK_BOX(sidebar), layers_label);
 
     GtkWidget *layers_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    gtk_widget_set_halign(layers_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(layers_box, SIDEBAR_WIDTH / 2, -1);
     gtk_box_append(GTK_BOX(sidebar), layers_box);
 
     s->btn_aurora = gtk_toggle_button_new_with_label("Aurora");
@@ -1140,11 +1162,20 @@ static void activate(GtkApplication *app, gpointer user_data)
     g_signal_connect(s->btn_muf, "toggled", G_CALLBACK(on_muf_toggle), s);
     g_signal_connect(s->btn_drap, "toggled", G_CALLBACK(on_drap_toggle), s);
 
-    gtk_box_append(GTK_BOX(sidebar), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    GtkWidget *btn_sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_widget_add_css_class(btn_sep, "btn-sep");
+    gtk_widget_set_halign(btn_sep, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(btn_sep, SIDEBAR_WIDTH * 3 / 4, -1);
+    gtk_box_append(GTK_BOX(sidebar), btn_sep);
 
-    /* PROJ + HOME buttons */
-    GtkWidget *ctrl_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    GtkWidget *map_label = gtk_label_new("MAP");
+    gtk_widget_add_css_class(map_label, "section-label");
+    gtk_box_append(GTK_BOX(sidebar), map_label);
+
+    /* PROJ + HOME buttons – stacked vertically, half sidebar width */
+    GtkWidget *ctrl_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_widget_set_halign(ctrl_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(ctrl_box, SIDEBAR_WIDTH / 2, -1);
     gtk_box_append(GTK_BOX(sidebar), ctrl_box);
 
     s->btn_proj = gtk_toggle_button_new_with_label("ORTHO");
@@ -1156,6 +1187,12 @@ static void activate(GtkApplication *app, gpointer user_data)
 
     g_signal_connect(s->btn_proj, "toggled", G_CALLBACK(on_proj_toggle), s);
     g_signal_connect(s->btn_home, "clicked", G_CALLBACK(on_home_clicked), s);
+
+    GtkWidget *map_sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_widget_add_css_class(map_sep, "btn-sep");
+    gtk_widget_set_halign(map_sep, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(map_sep, SIDEBAR_WIDTH * 3 / 4, -1);
+    gtk_box_append(GTK_BOX(sidebar), map_sep);
 
     /* Input controllers */
     input_init(&s->input, s->gl_area, s->window,
