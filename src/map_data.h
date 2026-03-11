@@ -1,0 +1,42 @@
+/* map_data.h — Shapefile loading and projected vertex management.
+ *
+ * Loads Natural Earth shapefiles (coastlines, borders, land polygons) via
+ * shapelib, stores raw lat/lon, and projects vertices into km-space.
+ * Supports reprojection on center/mode change, with two strategies:
+ * split-at-jumps (for line features) and nosplit with boundary clipping
+ * (for polygon fill via stencil buffer). */
+
+#ifndef MAP_DATA_H
+#define MAP_DATA_H
+
+#define MAX_SEGMENTS 4096
+
+typedef struct {
+    float *vertices;       /* Interleaved x,y pairs in km (projected) */
+    int    vertex_count;   /* Total number of vertices */
+    int    segment_starts[MAX_SEGMENTS]; /* Start index of each polyline */
+    int    segment_counts[MAX_SEGMENTS]; /* Vertex count per polyline */
+    int    segment_clamped[MAX_SEGMENTS]; /* 1 if any vertex was back-hemisphere */
+    int    num_segments;
+    /* Raw lat/lon for reprojection */
+    double *raw_lats;
+    double *raw_lons;
+    int     raw_count;
+    int     raw_seg_starts[MAX_SEGMENTS];
+    int     raw_seg_counts[MAX_SEGMENTS];
+    int     raw_num_segments;
+} MapData;
+
+/* Load shapefile and project all vertices. Returns 0 on success. */
+int map_data_load(MapData *md, const char *shp_path);
+
+/* Re-project all vertices (call after changing projection center). */
+void map_data_reproject(MapData *md);
+
+/* Re-project without splitting segments (preserves ring topology for polygon fill). */
+void map_data_reproject_nosplit(MapData *md);
+
+/* Free allocated memory. */
+void map_data_free(MapData *md);
+
+#endif
