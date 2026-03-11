@@ -68,6 +68,7 @@ typedef struct {
     GtkWidget *qrz_popover;
     GtkWidget *lbl_geomag;
     GtkWidget *lbl_drap_peak;
+    GtkWidget *legend_box;     /* container for E's/MUF/DRAP legends */
 
     /* Core state */
     Renderer   renderer;
@@ -314,23 +315,21 @@ static void update_sidebar_labels(AppState *s)
         gtk_widget_set_visible(s->lbl_az_from, FALSE);
     }
 
-    /* Geomag indices */
-    if (s->aurora_active && s->geomag.valid) {
+    /* Geomag indices — always visible */
+    if (s->geomag.valid) {
         snprintf(buf, sizeof(buf), "Kp %.1f  Bz %.1f nT",
                  s->geomag.kp, s->geomag.bz);
         gtk_label_set_text(GTK_LABEL(s->lbl_geomag), buf);
-        gtk_widget_set_visible(s->lbl_geomag, TRUE);
     } else {
-        gtk_widget_set_visible(s->lbl_geomag, FALSE);
+        gtk_label_set_text(GTK_LABEL(s->lbl_geomag), "Kp --  Bz -- nT");
     }
 
-    /* DRAP peak */
-    if (s->drap_active && s->drap_grid.valid) {
+    /* DRAP peak — always visible */
+    if (s->drap_grid.valid) {
         snprintf(buf, sizeof(buf), "DRAP peak %.1f MHz", s->drap_grid.peak_mhz);
         gtk_label_set_text(GTK_LABEL(s->lbl_drap_peak), buf);
-        gtk_widget_set_visible(s->lbl_drap_peak, TRUE);
     } else {
-        gtk_widget_set_visible(s->lbl_drap_peak, FALSE);
+        gtk_label_set_text(GTK_LABEL(s->lbl_drap_peak), "DRAP peak -- MHz");
     }
 }
 
@@ -465,7 +464,7 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
         float label_verts[8192];
         float label_bg_verts[256];
         int lvc = 0, lbg_vc = 0;
-        float label_size = 14.0f;
+        float label_size = 16.0f;
 
         /* Center label */
         float px, py;
@@ -563,6 +562,111 @@ static gboolean on_night_update(gpointer data)
     return G_SOURCE_CONTINUE;
 }
 
+/* ── Legend rebuild ────────────────────────────────────────────── */
+
+static GtkCssProvider *legend_css_provider = NULL;
+
+static void legend_add_colored_label(GtkWidget *row, const char *text,
+                                     float r, float g, float b, float a,
+                                     GString *css_buf, int id)
+{
+    char cls[32];
+    snprintf(cls, sizeof(cls), "lc%d", id);
+
+    GtkWidget *lbl = gtk_label_new(text);
+    gtk_widget_add_css_class(lbl, cls);
+    gtk_box_append(GTK_BOX(row), lbl);
+
+    g_string_append_printf(css_buf,
+        ".%s { color: rgba(%d,%d,%d,%.2f); font-family: monospace; font-size: 11px; } ",
+        cls, (int)(r * 255), (int)(g * 255), (int)(b * 255), a);
+}
+
+static void rebuild_legends(AppState *s)
+{
+    /* Clear existing children */
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child(s->legend_box)) != NULL)
+        gtk_box_remove(GTK_BOX(s->legend_box), child);
+
+    /* Remove old legend CSS provider */
+    if (legend_css_provider) {
+        gtk_style_context_remove_provider_for_display(
+            gdk_display_get_default(),
+            GTK_STYLE_PROVIDER(legend_css_provider));
+        g_object_unref(legend_css_provider);
+        legend_css_provider = NULL;
+    }
+
+    GString *css_buf = g_string_new("");
+    int color_id = 0;
+
+    /* E's legend */
+    if (s->spore_data.legend_count > 0) {
+        GtkWidget *title = gtk_label_new("E's (foEs MHz)");
+        gtk_widget_add_css_class(title, "section-label");
+        gtk_box_append(GTK_BOX(s->legend_box), title);
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+        gtk_widget_set_halign(row, GTK_ALIGN_CENTER);
+        gtk_box_append(GTK_BOX(s->legend_box), row);
+        for (int i = 0; i < s->spore_data.legend_count; i++) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.0f", s->spore_data.legend[i].mhz);
+            legend_add_colored_label(row, buf,
+                s->spore_data.legend[i].color[0],
+                s->spore_data.legend[i].color[1],
+                s->spore_data.legend[i].color[2],
+                1.0f, css_buf, color_id++);
+        }
+    }
+
+    /* MUF legend */
+    if (s->muf_data.legend_count > 0) {
+        GtkWidget *title = gtk_label_new("MUF (MHz)");
+        gtk_widget_add_css_class(title, "section-label");
+        gtk_box_append(GTK_BOX(s->legend_box), title);
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+        gtk_widget_set_halign(row, GTK_ALIGN_CENTER);
+        gtk_box_append(GTK_BOX(s->legend_box), row);
+        for (int i = 0; i < s->muf_data.legend_count; i++) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.0f", s->muf_data.legend[i].mhz);
+            legend_add_colored_label(row, buf,
+                s->muf_data.legend[i].color[0],
+                s->muf_data.legend[i].color[1],
+                s->muf_data.legend[i].color[2],
+                1.0f, css_buf, color_id++);
+        }
+    }
+
+    /* DRAP legend */
+    {
+        GtkWidget *title = gtk_label_new("DRAP");
+        gtk_widget_add_css_class(title, "section-label");
+        gtk_box_append(GTK_BOX(s->legend_box), title);
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+        gtk_widget_set_halign(row, GTK_ALIGN_CENTER);
+        gtk_box_append(GTK_BOX(s->legend_box), row);
+
+        const char *drap_levels[] = {"Low", "Med", "High"};
+        const float drap_alphas[] = {0.4f, 0.7f, 1.0f};
+        for (int i = 0; i < 3; i++) {
+            legend_add_colored_label(row, drap_levels[i],
+                0.85f, 0.2f, 0.05f, drap_alphas[i],
+                css_buf, color_id++);
+        }
+    }
+
+    /* Install new legend CSS provider */
+    legend_css_provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(legend_css_provider, css_buf->str);
+    gtk_style_context_add_provider_for_display(
+        gdk_display_get_default(),
+        GTK_STYLE_PROVIDER(legend_css_provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_string_free(css_buf, TRUE);
+}
+
 static gboolean on_fetch_poll(gpointer data)
 {
     AppState *s = (AppState *)data;
@@ -588,6 +692,7 @@ static gboolean on_fetch_poll(gpointer data)
                         renderer_upload_muf(&s->renderer, &s->muf_data);
                         need_redraw = 1;
                     }
+                    rebuild_legends(s);
                 }
             }
             fetch_cleanup(&s->muf_fetch);
@@ -610,6 +715,7 @@ static gboolean on_fetch_poll(gpointer data)
                         renderer_upload_spore(&s->renderer, &s->spore_data);
                         need_redraw = 1;
                     }
+                    rebuild_legends(s);
                 }
             }
             fetch_cleanup(&s->spore_fetch);
@@ -701,13 +807,13 @@ static gboolean on_fetch_poll(gpointer data)
         s->aurora_fetching = 1;
         s->last_aurora_fetch = now;
     }
-    if (s->drap_active && !s->drap_fetching &&
+    if (!s->drap_fetching &&
         now - s->last_drap_fetch >= OVERLAY_UPDATE_SEC) {
         fetch_start(&s->drap_fetch, DRAP_URL);
         s->drap_fetching = 1;
         s->last_drap_fetch = now;
     }
-    if (s->aurora_active && !s->kp_fetching && !s->bz_fetching &&
+    if (!s->kp_fetching && !s->bz_fetching &&
         now - s->last_geomag_fetch >= OVERLAY_UPDATE_SEC) {
         fetch_start(&s->kp_fetch, KP_URL);
         s->kp_fetching = 1;
@@ -911,7 +1017,6 @@ static void on_aurora_toggle(GtkToggleButton *btn, gpointer data)
         }
     } else {
         s->renderer.aurora_vertex_count = 0;
-        gtk_widget_set_visible(s->lbl_geomag, FALSE);
     }
 }
 
@@ -940,7 +1045,6 @@ static void on_drap_toggle(GtkToggleButton *btn, gpointer data)
                    &s->drap_fetch, &s->last_drap_fetch, DRAP_URL);
     if (!s->drap_active) {
         s->renderer.drap_vertex_count = 0;
-        gtk_widget_set_visible(s->lbl_drap_peak, FALSE);
     }
 }
 
@@ -1013,7 +1117,8 @@ static void load_css(void)
         ".sidebar button:hover { background-color: #252540; border-color: #558; }"
         ".sidebar button:checked { background-color: #2a4570; border-color: #4a7ab5; color: #fff; }"
         ".btn-sep { background-color: #ffffff; min-height: 1px; margin: 6px 0; }"
-        ".map-area { background-color: #0d0d1e; }"
+        ".info-sep { background-color: #667788; min-height: 1px; margin: 6px 0; }"
+        ".map-area { background-color: #0d0d1e; margin: 8px; }"
     );
     gtk_style_context_add_provider_for_display(
         gdk_display_get_default(),
@@ -1092,16 +1197,31 @@ static void activate(GtkApplication *app, gpointer user_data)
     gtk_box_append(GTK_BOX(sidebar), s->lbl_az_to);
     gtk_box_append(GTK_BOX(sidebar), s->lbl_az_from);
 
+    GtkWidget *info_sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_widget_add_css_class(info_sep, "info-sep");
+    gtk_widget_set_halign(info_sep, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(info_sep, SIDEBAR_WIDTH * 3 / 4, -1);
+    gtk_box_append(GTK_BOX(sidebar), info_sep);
+
     /* Geomag + DRAP info */
-    s->lbl_geomag = gtk_label_new("");
+    s->lbl_geomag = gtk_label_new("Kp --  Bz -- nT");
     gtk_widget_add_css_class(s->lbl_geomag, "info-label");
-    gtk_widget_set_visible(s->lbl_geomag, FALSE);
     gtk_box_append(GTK_BOX(sidebar), s->lbl_geomag);
 
-    s->lbl_drap_peak = gtk_label_new("");
+    s->lbl_drap_peak = gtk_label_new("DRAP peak -- MHz");
     gtk_widget_add_css_class(s->lbl_drap_peak, "info-label");
-    gtk_widget_set_visible(s->lbl_drap_peak, FALSE);
     gtk_box_append(GTK_BOX(sidebar), s->lbl_drap_peak);
+
+    GtkWidget *legend_sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_widget_add_css_class(legend_sep, "info-sep");
+    gtk_widget_set_halign(legend_sep, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(legend_sep, SIDEBAR_WIDTH * 3 / 4, -1);
+    gtk_box_append(GTK_BOX(sidebar), legend_sep);
+
+    /* Legends for E's, MUF, DRAP */
+    s->legend_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_box_append(GTK_BOX(sidebar), s->legend_box);
+    rebuild_legends(s);
 
     /* Spacer to push buttons to bottom */
     GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
