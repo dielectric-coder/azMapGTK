@@ -67,6 +67,7 @@ typedef struct {
     GtkWidget *qrz_entry;
     GtkWidget *qrz_popover;
     GtkWidget *lbl_geomag;
+    GtkWidget *lbl_solar;
     GtkWidget *lbl_drap_peak;
     GtkWidget *legend_box;     /* container for E's/MUF/DRAP legends */
 
@@ -101,8 +102,9 @@ typedef struct {
     int          muf_fetching, aurora_fetching, spore_fetching, drap_fetching;
     time_t       last_muf_fetch, last_aurora_fetch, last_spore_fetch, last_drap_fetch;
     GeomagIndices geomag;
-    FetchRequest  kp_fetch, bz_fetch;
-    int           kp_fetching, bz_fetching;
+    SolarIndices  solar;
+    FetchRequest  kp_fetch, bz_fetch, solar_fetch;
+    int           kp_fetching, bz_fetching, solar_fetching;
     time_t        last_geomag_fetch;
 
     /* Coordinates */
@@ -322,6 +324,15 @@ static void update_sidebar_labels(AppState *s)
         gtk_label_set_text(GTK_LABEL(s->lbl_geomag), buf);
     } else {
         gtk_label_set_text(GTK_LABEL(s->lbl_geomag), "Kp --  Bz -- nT");
+    }
+
+    /* Solar indices — always visible */
+    if (s->solar.valid) {
+        snprintf(buf, sizeof(buf), "SFU %d  SSN %d",
+                 s->solar.sfu, s->solar.ssn);
+        gtk_label_set_text(GTK_LABEL(s->lbl_solar), buf);
+    } else {
+        gtk_label_set_text(GTK_LABEL(s->lbl_solar), "SFU --  SSN --");
     }
 
     /* DRAP peak — always visible */
@@ -787,6 +798,17 @@ static gboolean on_fetch_poll(gpointer data)
             fetch_cleanup(&s->bz_fetch);
         }
     }
+    if (s->solar_fetching) {
+        int st = fetch_check(&s->solar_fetch);
+        if (st != 0) {
+            s->solar_fetching = 0;
+            if (st == 1) {
+                char *txt = fetch_take_response(&s->solar_fetch);
+                if (txt) { solar_parse_text(txt, &s->solar); free(txt); }
+            }
+            fetch_cleanup(&s->solar_fetch);
+        }
+    }
 
     /* Auto-refresh overlays every OVERLAY_UPDATE_SEC */
     if (s->muf_active && !s->muf_fetching &&
@@ -819,6 +841,10 @@ static gboolean on_fetch_poll(gpointer data)
         s->kp_fetching = 1;
         fetch_start(&s->bz_fetch, BZ_URL);
         s->bz_fetching = 1;
+        if (!s->solar_fetching) {
+            fetch_start(&s->solar_fetch, SOLAR_URL);
+            s->solar_fetching = 1;
+        }
         s->last_geomag_fetch = now;
     }
 
@@ -1214,6 +1240,10 @@ static void activate(GtkApplication *app, gpointer user_data)
     gtk_widget_add_css_class(s->lbl_geomag, "info-label");
     gtk_box_append(GTK_BOX(sidebar), s->lbl_geomag);
 
+    s->lbl_solar = gtk_label_new("SFU --  SSN --");
+    gtk_widget_add_css_class(s->lbl_solar, "info-label");
+    gtk_box_append(GTK_BOX(sidebar), s->lbl_solar);
+
     s->lbl_drap_peak = gtk_label_new("DRAP peak -- MHz");
     gtk_widget_add_css_class(s->lbl_drap_peak, "info-label");
     gtk_box_append(GTK_BOX(sidebar), s->lbl_drap_peak);
@@ -1372,6 +1402,7 @@ static void on_shutdown(GtkApplication *app, gpointer data)
     if (s->drap_fetching) fetch_cleanup(&s->drap_fetch);
     if (s->kp_fetching) fetch_cleanup(&s->kp_fetch);
     if (s->bz_fetching) fetch_cleanup(&s->bz_fetch);
+    if (s->solar_fetching) fetch_cleanup(&s->solar_fetch);
 
     if (s->has_qrz) qrz_cleanup();
     if (s->gl_initialized) renderer_destroy(&s->renderer);
@@ -1570,6 +1601,7 @@ int main(int argc, char **argv)
     drap_grid_init(&s->drap_grid);
     aurora_mesh_init(&s->drap_mesh);
     geomag_init(&s->geomag);
+    solar_init(&s->solar);
 
     /* Text system */
     text_init();

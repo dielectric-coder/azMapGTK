@@ -18,6 +18,7 @@
 #define KP_URL     "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"
 #define BZ_URL     "https://services.swpc.noaa.gov/products/summary/solar-wind-mag-field.json"
 #define DRAP_URL   "https://services.swpc.noaa.gov/text/drap_global_frequencies.txt"
+#define SOLAR_URL  "https://services.swpc.noaa.gov/text/daily-solar-indices.txt"
 
 #define MUF_MAX_SEGMENTS 256
 #define MUF_MAX_LEGEND   16
@@ -105,5 +106,15 @@ typedef struct {
 void  geomag_init(GeomagIndices *g);
 int   geomag_parse_kp(const char *json_str, GeomagIndices *g);
 int   geomag_parse_bz(const char *json_str, GeomagIndices *g);
+
+/* Solar indices (SFU + SSN) */
+typedef struct {
+    int sfu;        /* 10.7 cm radio flux (Solar Flux Units) */
+    int ssn;        /* Sunspot number */
+    int valid;      /* 1 if data loaded */
+} SolarIndices;
+
+void  solar_init(SolarIndices *s);
+int   solar_parse_text(const char *text, SolarIndices *s);
 
 #endif

@@ -1151,3 +1151,46 @@ int geomag_parse_bz(const char *json_str, GeomagIndices *g)
     cJSON_Delete(root);
     return 0;
 }
+
+/* ── Solar indices (SFU + SSN) ─────────────────────────────────── */
+
+void solar_init(SolarIndices *s)
+{
+    s->sfu = 0;
+    s->ssn = 0;
+    s->valid = 0;
+}
+
+int solar_parse_text(const char *text, SolarIndices *s)
+{
+    /* Format: fixed-width text with comment lines starting with ':' or '#'.
+     * Data columns: YYYY MM DD  Flux  SSN  Area  ...
+     * We want the last non-empty data line. */
+    const char *last_line = NULL;
+    const char *p = text;
+
+    while (*p) {
+        /* Skip whitespace at start of line */
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p && *p != ':' && *p != '#' && *p != '\n' && *p != '\r') {
+            /* Check if line starts with a year (4 digits) */
+            if (p[0] >= '1' && p[0] <= '2' && p[1] >= '0' && p[1] <= '9' &&
+                p[2] >= '0' && p[2] <= '9' && p[3] >= '0' && p[3] <= '9')
+                last_line = p;
+        }
+        /* Advance to next line */
+        while (*p && *p != '\n') p++;
+        if (*p == '\n') p++;
+    }
+
+    if (!last_line) return -1;
+
+    int year, month, day, flux, ssn;
+    if (sscanf(last_line, "%d %d %d %d %d", &year, &month, &day, &flux, &ssn) == 5) {
+        s->sfu = flux;
+        s->ssn = ssn;
+        s->valid = 1;
+        return 0;
+    }
+    return -1;
+}
