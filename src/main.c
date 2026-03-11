@@ -147,10 +147,16 @@ static void resolve_path(const char *exe, const char *rel, char *out, size_t out
     exe_copy[PATH_MAX - 1] = '\0';
     char *dir = dirname(exe_copy);
 
+    /* Try relative to executable (build tree) */
     snprintf(out, out_size, "%s/../%s", dir, rel);
     if (access(out, F_OK) == 0)
         return;
+    /* Try installed azmap-gtk share */
     snprintf(out, out_size, "%s/../share/azmap-gtk/%s", dir, rel);
+    if (access(out, F_OK) == 0)
+        return;
+    /* Fall back to azmap share (shared data) */
+    snprintf(out, out_size, "%s/../share/azmap/%s", dir, rel);
 }
 
 static int format_coord(char *buf, size_t sz, double lat, double lon)
