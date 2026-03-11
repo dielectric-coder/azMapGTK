@@ -901,6 +901,9 @@ static gboolean on_fifo_readable(GIOChannel *source, GIOCondition cond, gpointer
         build_label(s->target_label, sizeof(s->target_label),
                     s->target_name, s->target_lat, s->target_lon);
 
+        if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(s->btn_qrz)))
+            gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(s->btn_qrz), FALSE);
+
         if (s->gl_initialized) {
             gtk_gl_area_make_current(GTK_GL_AREA(s->gl_area));
             update_target_geometry(s, 1);
@@ -1087,6 +1090,9 @@ static void on_qrz_activate(GtkEntry *entry, gpointer data)
         for (int i = si; i < 6; i++)
             gtk_widget_set_visible(s->lbl_station_info[i], FALSE);
 
+        if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(s->btn_qrz)))
+            gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(s->btn_qrz), TRUE);
+
         if (s->gl_initialized) {
             gtk_gl_area_make_current(GTK_GL_AREA(s->gl_area));
             update_target_geometry(s, 1);
@@ -1239,7 +1245,7 @@ static void activate(GtkApplication *app, gpointer user_data)
     gtk_widget_set_size_request(src_box, SIDEBAR_WIDTH / 2, -1);
     gtk_box_append(GTK_BOX(sidebar), src_box);
 
-    s->btn_qrz = gtk_button_new_with_label("QRZ");
+    s->btn_qrz = gtk_toggle_button_new_with_label("QRZ");
     gtk_box_append(GTK_BOX(src_box), s->btn_qrz);
 
     /* QRZ popover with entry */

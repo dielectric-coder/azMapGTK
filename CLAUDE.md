@@ -44,7 +44,7 @@ Map data: Natural Earth 110m shapefiles in `data/` (or symlinked from `../azMap/
 
 ### Rendering Pipeline
 
-The app uses a single GLSL shader program (`shaders/map.vert` + `shaders/map.frag`) with two uniforms: `u_mvp` (4x4 matrix) and `u_color` (vec4). All geometry is 2D (x,y floats). The rendering works in two coordinate spaces:
+The app uses a single GLSL shader program (`shaders/map.vert` + `shaders/map.frag`) with three uniforms: `u_mvp` (4x4 matrix), `u_color` (vec4), and `u_stipple` (float, enables dotted-line rendering when > 0). All geometry is 2D (x,y floats). The rendering works in two coordinate spaces:
 
 1. **km-space** — map geometry projected via `camera.c` MVP matrix. Layers drawn back-to-front: earth disc (stencil-filled land) → grid → distance circles → night overlay → aurora/DRAP → borders → coastlines → MUF/SporE contours → great circle line → markers → north pole.
 2. **pixel-space** — labels rendered with a simple orthographic matrix after the map layers. Uses `text.c` vector stroke font (GL_LINES).
@@ -86,7 +86,7 @@ The sidebar (`SIDEBAR_WIDTH` = 260px) is a vertical GtkBox with sections separat
 - **Station info** — DIST, AZ TO, AZ FROM (visible when target set)
 - **Propagation indices** — Kp/Bz and DRAP peak (always visible, fetched independently of overlay toggles)
 - **Legends** — color-coded E's (foEs MHz), MUF (MHz), and DRAP level legends; rebuilt dynamically via `rebuild_legends()` when overlay data arrives
-- **SOURCE** — QRZ callsign lookup button
+- **SOURCE** — QRZ callsign lookup toggle button (highlights when station info originates from QRZ; auto-deactivates when another source updates station info)
 - **LAYERS** — toggle buttons for Aurora, E's, MUF, DRAP overlays
 - **MAP** — ORTHO/HOME buttons (projection toggle + view reset)
 

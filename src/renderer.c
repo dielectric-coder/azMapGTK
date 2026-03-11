@@ -95,6 +95,7 @@ int renderer_init(Renderer *r, const char *shader_dir)
 
     r->mvp_loc = glGetUniformLocation(r->program, "u_mvp");
     r->color_loc = glGetUniformLocation(r->program, "u_color");
+    r->stipple_loc = glGetUniformLocation(r->program, "u_stipple");
 
     glEnable(GL_LINE_SMOOTH);
     glEnable(GL_BLEND);
@@ -636,9 +637,10 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         }
     }
 
-    /* Sporadic E contour lines — two-pass glow */
+    /* Sporadic E contour lines — two-pass glow, dotted */
     if (r->spore_vao && r->spore_num_segments > 0) {
         glVertexAttrib1f(1, 1.0f);
+        glUniform1f(r->stipple_loc, 1.0f);
         glBindVertexArray(r->spore_vao);
         for (int pass = 0; pass < 2; pass++) {
             glLineWidth(pass == 0 ? 6.0f : 2.0f);
@@ -653,6 +655,7 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
                              r->spore_segment_counts[i]);
             }
         }
+        glUniform1f(r->stipple_loc, 0.0f);
         glLineWidth(1.5f);
     }
 

@@ -14,6 +14,7 @@ typedef struct {
     unsigned int program;
     int          mvp_loc;
     int          color_loc;
+    int          stipple_loc;
 
     /* Map coastline geometry */
     unsigned int map_vao;
