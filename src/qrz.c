@@ -198,10 +198,18 @@ int qrz_lookup(const char *callsign, QRZResult *result, char *err_buf, int err_s
             session_key[0] = '\0';
             if (qrz_login(err_buf, err_sz) != 0)
                 return -1;
-            /* Retry lookup */
-            snprintf(url, sizeof(url),
-                     "https://xmldata.qrz.com/xml/current/?s=%s;callsign=%s",
-                     session_key, call_upper);
+            /* Retry lookup with proper escaping */
+            {
+                CURL *enc2 = curl_easy_init();
+                char *esc_key = enc2 ? curl_easy_escape(enc2, session_key, 0) : NULL;
+                char *esc_call2 = enc2 ? curl_easy_escape(enc2, call_upper, 0) : NULL;
+                snprintf(url, sizeof(url),
+                         "https://xmldata.qrz.com/xml/current/?s=%s;callsign=%s",
+                         esc_key ? esc_key : "", esc_call2 ? esc_call2 : "");
+                curl_free(esc_key);
+                curl_free(esc_call2);
+                if (enc2) curl_easy_cleanup(enc2);
+            }
             if (http_get(url, &buf) != 0) {
                 if (err_buf) snprintf(err_buf, err_sz, "HTTP REQUEST FAILED");
                 return -1;

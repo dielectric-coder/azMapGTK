@@ -1194,3 +1194,74 @@ int solar_parse_text(const char *text, SolarIndices *s)
     }
     return -1;
 }
+
+/* ── NOAA Space Weather Scales (R/S/G) ─────────────────────────── */
+
+void scales_init(NoaaScales *sc)
+{
+    sc->r = 0;
+    sc->s = 0;
+    sc->g = 0;
+    sc->valid = 0;
+}
+
+/* ── Latest X-ray flare ─────────────────────────────────────────── */
+
+void xray_init(XrayFlare *xf)
+{
+    xf->max_class[0] = '\0';
+    xf->valid = 0;
+}
+
+int xray_parse_json(const char *json_str, XrayFlare *xf)
+{
+    /* Single object: {"max_class": "C4.0", ...} */
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root) return -1;
+
+    cJSON *mc = cJSON_GetObjectItem(root, "max_class");
+    if (mc && cJSON_IsString(mc) && mc->valuestring) {
+        strncpy(xf->max_class, mc->valuestring, sizeof(xf->max_class) - 1);
+        xf->max_class[sizeof(xf->max_class) - 1] = '\0';
+        xf->valid = 1;
+    }
+
+    cJSON_Delete(root);
+    return xf->valid ? 0 : -1;
+}
+
+int scales_parse_json(const char *json_str, NoaaScales *sc)
+{
+    /* Format: {"0": {"R": {"Scale": "0", ...}, "S": {"Scale": "0", ...},
+     *                "G": {"Scale": "1", ...}, ...}, "1": {...}, ...}
+     * Entry "0" is the current observed values. */
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root) return -1;
+
+    cJSON *current = cJSON_GetObjectItem(root, "0");
+    if (!current) { cJSON_Delete(root); return -1; }
+
+    cJSON *r_obj = cJSON_GetObjectItem(current, "R");
+    cJSON *s_obj = cJSON_GetObjectItem(current, "S");
+    cJSON *g_obj = cJSON_GetObjectItem(current, "G");
+
+    if (r_obj) {
+        cJSON *v = cJSON_GetObjectItem(r_obj, "Scale");
+        if (v && cJSON_IsString(v) && v->valuestring)
+            sc->r = atoi(v->valuestring);
+    }
+    if (s_obj) {
+        cJSON *v = cJSON_GetObjectItem(s_obj, "Scale");
+        if (v && cJSON_IsString(v) && v->valuestring)
+            sc->s = atoi(v->valuestring);
+    }
+    if (g_obj) {
+        cJSON *v = cJSON_GetObjectItem(g_obj, "Scale");
+        if (v && cJSON_IsString(v) && v->valuestring)
+            sc->g = atoi(v->valuestring);
+    }
+
+    sc->valid = 1;
+    cJSON_Delete(root);
+    return 0;
+}

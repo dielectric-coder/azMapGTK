@@ -103,8 +103,10 @@ typedef struct {
     time_t       last_muf_fetch, last_aurora_fetch, last_spore_fetch, last_drap_fetch;
     GeomagIndices geomag;
     SolarIndices  solar;
-    FetchRequest  kp_fetch, bz_fetch, solar_fetch;
-    int           kp_fetching, bz_fetching, solar_fetching;
+    NoaaScales    scales;
+    XrayFlare     xray;
+    FetchRequest  kp_fetch, bz_fetch, solar_fetch, scales_fetch, xray_fetch;
+    int           kp_fetching, bz_fetching, solar_fetching, scales_fetching, xray_fetching;
     time_t        last_geomag_fetch;
 
     /* Coordinates */
@@ -326,21 +328,28 @@ static void update_sidebar_labels(AppState *s)
         gtk_label_set_text(GTK_LABEL(s->lbl_geomag), "Kp --  Bz -- nT");
     }
 
-    /* Solar indices — always visible */
-    if (s->solar.valid) {
-        snprintf(buf, sizeof(buf), "SFU %d  SSN %d",
-                 s->solar.sfu, s->solar.ssn);
+    /* Solar indices + X-ray flare — always visible */
+    {
+        const char *xr = s->xray.valid ? s->xray.max_class : "--";
+        if (s->solar.valid)
+            snprintf(buf, sizeof(buf), "SFU %d  SSN %d  %s",
+                     s->solar.sfu, s->solar.ssn, xr);
+        else
+            snprintf(buf, sizeof(buf), "SFU --  SSN --  %s", xr);
         gtk_label_set_text(GTK_LABEL(s->lbl_solar), buf);
-    } else {
-        gtk_label_set_text(GTK_LABEL(s->lbl_solar), "SFU --  SSN --");
     }
 
-    /* DRAP peak — always visible */
-    if (s->drap_grid.valid) {
-        snprintf(buf, sizeof(buf), "DRAP peak %.1f MHz", s->drap_grid.peak_mhz);
-        gtk_label_set_text(GTK_LABEL(s->lbl_drap_peak), buf);
-    } else {
-        gtk_label_set_text(GTK_LABEL(s->lbl_drap_peak), "DRAP peak -- MHz");
+    /* DRAP peak + NOAA scales — always visible, single line */
+    {
+        const char *rsg = s->scales.valid ?
+            (snprintf(buf, sizeof(buf), "R%d S%d G%d",
+                      s->scales.r, s->scales.s, s->scales.g), buf) : "R- S- G-";
+        char line[128];
+        if (s->drap_grid.valid)
+            snprintf(line, sizeof(line), "DRAP %.1f MHz  %s", s->drap_grid.peak_mhz, rsg);
+        else
+            snprintf(line, sizeof(line), "DRAP -- MHz  %s", rsg);
+        gtk_label_set_text(GTK_LABEL(s->lbl_drap_peak), line);
     }
 }
 
@@ -820,6 +829,28 @@ static gboolean on_fetch_poll(gpointer data)
             fetch_cleanup(&s->solar_fetch);
         }
     }
+    if (s->scales_fetching) {
+        int st = fetch_check(&s->scales_fetch);
+        if (st != 0) {
+            s->scales_fetching = 0;
+            if (st == 1) {
+                char *json = fetch_take_response(&s->scales_fetch);
+                if (json) { scales_parse_json(json, &s->scales); free(json); }
+            }
+            fetch_cleanup(&s->scales_fetch);
+        }
+    }
+    if (s->xray_fetching) {
+        int st = fetch_check(&s->xray_fetch);
+        if (st != 0) {
+            s->xray_fetching = 0;
+            if (st == 1) {
+                char *json = fetch_take_response(&s->xray_fetch);
+                if (json) { xray_parse_json(json, &s->xray); free(json); }
+            }
+            fetch_cleanup(&s->xray_fetch);
+        }
+    }
 
     /* Auto-refresh overlays every OVERLAY_UPDATE_SEC */
     if (s->muf_active && !s->muf_fetching &&
@@ -855,6 +886,14 @@ static gboolean on_fetch_poll(gpointer data)
         if (!s->solar_fetching) {
             fetch_start(&s->solar_fetch, SOLAR_URL);
             s->solar_fetching = 1;
+        }
+        if (!s->scales_fetching) {
+            fetch_start(&s->scales_fetch, SCALES_URL);
+            s->scales_fetching = 1;
+        }
+        if (!s->xray_fetching) {
+            fetch_start(&s->xray_fetch, XRAY_URL);
+            s->xray_fetching = 1;
         }
         s->last_geomag_fetch = now;
     }
@@ -1382,10 +1421,17 @@ static void activate(GtkApplication *app, gpointer user_data)
     s->night_timer_id = g_timeout_add_seconds(NIGHT_UPDATE_SEC, on_night_update, s);
     s->fetch_timer_id = g_timeout_add(500, on_fetch_poll, s);
 
-    /* FIFO IPC */
-    #define FIFO_PATH "/tmp/azmap-target.fifo"
-    mkfifo(FIFO_PATH, 0600);
-    s->fifo_fd = open(FIFO_PATH, O_RDWR | O_NONBLOCK);
+    /* FIFO IPC — use XDG_RUNTIME_DIR to avoid symlink races in /tmp */
+    const char *runtime = g_get_user_runtime_dir();
+    char fifo_path[512];
+    snprintf(fifo_path, sizeof(fifo_path), "%s/azmap-target.fifo", runtime);
+    unlink(fifo_path);  /* remove stale entry so mkfifo succeeds */
+    s->fifo_fd = -1;
+    if (mkfifo(fifo_path, 0600) == 0) {
+        struct stat st;
+        if (lstat(fifo_path, &st) == 0 && S_ISFIFO(st.st_mode))
+            s->fifo_fd = open(fifo_path, O_RDWR | O_NONBLOCK);
+    }
     if (s->fifo_fd >= 0) {
         GIOChannel *fifo_chan = g_io_channel_unix_new(s->fifo_fd);
         s->fifo_source_id = g_io_add_watch(fifo_chan, G_IO_IN, on_fifo_readable, s);
@@ -1417,7 +1463,12 @@ static void on_shutdown(GtkApplication *app, gpointer data)
                       DEFAULT_WIDTH, DEFAULT_HEIGHT, 1);
 
     if (s->fifo_fd >= 0) close(s->fifo_fd);
-    unlink(FIFO_PATH);
+    {
+        const char *rt = g_get_user_runtime_dir();
+        char fp[512];
+        snprintf(fp, sizeof(fp), "%s/azmap-target.fifo", rt);
+        unlink(fp);
+    }
 
     if (s->muf_fetching) fetch_cleanup(&s->muf_fetch);
     if (s->spore_fetching) fetch_cleanup(&s->spore_fetch);
@@ -1624,6 +1675,8 @@ int main(int argc, char **argv)
     aurora_mesh_init(&s->drap_mesh);
     geomag_init(&s->geomag);
     solar_init(&s->solar);
+    scales_init(&s->scales);
+    xray_init(&s->xray);
 
     /* Text system */
     text_init();

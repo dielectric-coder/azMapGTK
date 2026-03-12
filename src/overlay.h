@@ -19,6 +19,8 @@
 #define BZ_URL     "https://services.swpc.noaa.gov/products/summary/solar-wind-mag-field.json"
 #define DRAP_URL   "https://services.swpc.noaa.gov/text/drap_global_frequencies.txt"
 #define SOLAR_URL  "https://services.swpc.noaa.gov/text/daily-solar-indices.txt"
+#define SCALES_URL "https://services.swpc.noaa.gov/products/noaa-scales.json"
+#define XRAY_URL   "https://services.swpc.noaa.gov/json/goes/primary/xray-flares-latest.json"
 
 #define MUF_MAX_SEGMENTS 256
 #define MUF_MAX_LEGEND   16
@@ -116,5 +118,25 @@ typedef struct {
 
 void  solar_init(SolarIndices *s);
 int   solar_parse_text(const char *text, SolarIndices *s);
+
+/* NOAA Space Weather Scales (R/S/G) */
+typedef struct {
+    int r;          /* Radio Blackout level (0-5) */
+    int s;          /* Solar Radiation Storm level (0-5) */
+    int g;          /* Geomagnetic Storm level (0-5) */
+    int valid;
+} NoaaScales;
+
+void  scales_init(NoaaScales *sc);
+int   scales_parse_json(const char *json_str, NoaaScales *sc);
+
+/* Latest X-ray flare class */
+typedef struct {
+    char max_class[8];   /* e.g. "M5.0", "X1.2", "C3.4" */
+    int  valid;
+} XrayFlare;
+
+void  xray_init(XrayFlare *xf);
+int   xray_parse_json(const char *json_str, XrayFlare *xf);
 
 #endif

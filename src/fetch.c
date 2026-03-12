@@ -20,6 +20,7 @@ typedef struct {
 static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
 {
     Buffer *buf = userdata;
+    if (size != 0 && nmemb > (size_t)-1 / size) return 0;
     size_t total = size * nmemb;
     if (buf->len + total + 1 > buf->cap) {
         size_t newcap = (buf->cap + total + 1) * 2;
