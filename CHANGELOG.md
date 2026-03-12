@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.1 — 2026-03-12
+
+### Fixed
+
+- Missing cleanup of FIFO event source, scales fetch, and X-ray fetch on shutdown (resource leaks)
+- Mutex leak in fetch_start() when strdup() fails
+- Potential NULL dereference in QRZ HTTP buffer allocation
+- Shader glob pattern in CMakeLists.txt now matches only .vert/.frag files
+
+### Updated
+
+- Documentation: corrected FIFO IPC path to `$XDG_RUNTIME_DIR/azmap-target.fifo`
+- README: added SFU/SSN, NOAA scales, and X-ray flare class to features list
+
 ## v0.1.0 — 2026-03-10
 
 Initial GTK4 port of azMap.

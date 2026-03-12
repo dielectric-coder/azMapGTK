@@ -87,6 +87,7 @@ void fetch_start(FetchRequest *req, const char *url)
     pthread_mutex_init(&req->mutex, NULL);
     req->url = strdup(url);
     if (!req->url) {
+        pthread_mutex_destroy(&req->mutex);
         req->status = -1;
         return;
     }

@@ -83,6 +83,7 @@ static int http_get(const char *url, Buffer *buf)
     CURL *curl = curl_easy_init();
     if (!curl) return -1;
     buf_init(buf);
+    if (!buf->data) { curl_easy_cleanup(curl); return -1; }
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, buf);

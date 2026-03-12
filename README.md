@@ -10,10 +10,11 @@ GTK4 port of [azMap](https://github.com/mikelisfbay/azMap) — an interactive az
 - Great circle path, distance, and azimuth display
 - Day/night terminator overlay with twilight gradient
 - HF propagation overlays: MUF contours (KC2G), Sporadic E (KC2G), Aurora (NOAA OVATION), DRAP absorption (NOAA SWPC)
-- Geomagnetic indices (Kp, Bz)
+- Geomagnetic indices (Kp, Bz), solar indices (SFU, SSN)
+- NOAA space weather scales and X-ray flare classification
 - QRZ.com callsign lookup
 - Distance circles (2000 km intervals)
-- FIFO IPC for target updates from external applications
+- FIFO IPC for target updates from external applications (`$XDG_RUNTIME_DIR/azmap-target.fifo`)
 - Zoom, pan, and keyboard navigation
 
 ## Dependencies

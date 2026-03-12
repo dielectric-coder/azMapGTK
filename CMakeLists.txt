@@ -72,7 +72,7 @@ target_compile_options(azmap-gtk PRIVATE
 )
 
 # Copy shaders to build directory
-file(GLOB SHADER_FILES ${CMAKE_SOURCE_DIR}/shaders/*)
+file(GLOB SHADER_FILES ${CMAKE_SOURCE_DIR}/shaders/*.vert ${CMAKE_SOURCE_DIR}/shaders/*.frag)
 add_custom_target(copy_shaders ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/shaders ${CMAKE_BINARY_DIR}/shaders

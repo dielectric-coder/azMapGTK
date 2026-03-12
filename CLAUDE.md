@@ -57,7 +57,7 @@ Land fill uses the **stencil buffer**: disc marks stencil bit 7, land polygons i
 - **Startup**: parses CLI args → loads config → loads shapefiles via `map_data.c` → projects vertices via `projection.c` → uploads geometry to GPU via `renderer_upload_*()`.
 - **Interaction**: `input.c` registers GTK4 event controllers (scroll/drag/key) on the GtkGLArea. Events update `camera.c` state, trigger reprojection, re-upload, and `gtk_gl_area_queue_render()`.
 - **Timers**: GTK `g_timeout_add()` drives periodic updates — night overlay (60s), overlay data fetches, clock labels.
-- **FIFO IPC**: reads target coords from `/tmp/azmap_fifo` for external app integration.
+- **FIFO IPC**: reads target coords from `$XDG_RUNTIME_DIR/azmap-target.fifo` for external app integration.
 
 ### Module Boundaries
 
@@ -84,7 +84,7 @@ GTK4-specific (the "glue" layer):
 The sidebar (`SIDEBAR_WIDTH` = 260px) is a vertical GtkBox with sections separated by styled separators:
 - **Clock** — UTC and local time labels
 - **Station info** — DIST, AZ TO, AZ FROM (visible when target set)
-- **Propagation indices** — Kp/Bz, SFU/SSN, and DRAP peak (always visible, fetched independently of overlay toggles)
+- **Propagation indices** — Kp/Bz, SFU/SSN, X-ray flare class, NOAA scales, and DRAP peak (always visible, fetched independently of overlay toggles)
 - **Legends** — color-coded E's (foEs MHz), MUF (MHz), and DRAP level legends; rebuilt dynamically via `rebuild_legends()` when overlay data arrives
 - **SOURCE** — QRZ callsign lookup toggle button (highlights when station info originates from QRZ; auto-deactivates when another source updates station info)
 - **LAYERS** — toggle buttons for Aurora, E's, MUF, DRAP overlays

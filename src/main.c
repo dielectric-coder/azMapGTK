@@ -1454,6 +1454,7 @@ static void on_shutdown(GtkApplication *app, gpointer data)
     if (s->clock_timer_id) g_source_remove(s->clock_timer_id);
     if (s->night_timer_id) g_source_remove(s->night_timer_id);
     if (s->fetch_timer_id) g_source_remove(s->fetch_timer_id);
+    if (s->fifo_source_id) g_source_remove(s->fifo_source_id);
 
     /* Save session state */
     config_save_state(s->target_lat, s->target_lon, s->target_name,
@@ -1477,6 +1478,8 @@ static void on_shutdown(GtkApplication *app, gpointer data)
     if (s->kp_fetching) fetch_cleanup(&s->kp_fetch);
     if (s->bz_fetching) fetch_cleanup(&s->bz_fetch);
     if (s->solar_fetching) fetch_cleanup(&s->solar_fetch);
+    if (s->scales_fetching) fetch_cleanup(&s->scales_fetch);
+    if (s->xray_fetching) fetch_cleanup(&s->xray_fetch);
 
     if (s->has_qrz) qrz_cleanup();
     map_data_free(&s->map);
