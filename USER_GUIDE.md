@@ -86,6 +86,7 @@ These keys are written automatically on exit and restored on next launch. You ge
 |-----|-----------|------------|
 | Arrow keys | Pan camera | Rotate globe |
 | R | Reset view (center + zoom) | Reset view (center + zoom) |
+| X | Swap source (QTH) ↔ target | Swap source (QTH) ↔ target |
 | Q / Esc | Quit | Quit |
 
 ### Sidebar Buttons
@@ -196,10 +197,10 @@ Data refreshes automatically on a timer. An internet connection is required for 
 azMapGTK creates a named pipe at `$XDG_RUNTIME_DIR/azmap-target.fifo` (typically `/run/user/<uid>/azmap-target.fifo`). External applications can write target coordinates to this FIFO to update the map in real time:
 
 ```bash
-echo "48.8566 2.3522 Paris" > "$XDG_RUNTIME_DIR/azmap-target.fifo"
+echo "48.8566,2.3522,Paris" > "$XDG_RUNTIME_DIR/azmap-target.fifo"
 ```
 
-Format: `<lat> <lon> [name]` — latitude and longitude in decimal degrees, optional station name. The FIFO is removed on application exit.
+Format: `<lat>,<lon>,<name>` or `<lat>,<lon>,<name>|<detail fields>` — latitude and longitude in decimal degrees, with comma-separated station name and optional pipe-delimited detail fields. The FIFO is removed on application exit.
 
 ## Map Data
 

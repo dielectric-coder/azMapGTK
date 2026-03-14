@@ -1215,11 +1215,12 @@ void xray_init(XrayFlare *xf)
 
 int xray_parse_json(const char *json_str, XrayFlare *xf)
 {
-    /* Single object: {"max_class": "C4.0", ...} */
+    /* API returns an array of flare objects — use the first element */
     cJSON *root = cJSON_Parse(json_str);
     if (!root) return -1;
 
-    cJSON *mc = cJSON_GetObjectItem(root, "max_class");
+    cJSON *item = cJSON_IsArray(root) ? cJSON_GetArrayItem(root, 0) : root;
+    cJSON *mc = item ? cJSON_GetObjectItem(item, "max_class") : NULL;
     if (mc && cJSON_IsString(mc) && mc->valuestring) {
         strncpy(xf->max_class, mc->valuestring, sizeof(xf->max_class) - 1);
         xf->max_class[sizeof(xf->max_class) - 1] = '\0';

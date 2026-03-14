@@ -76,7 +76,7 @@ Core modules (shared with original azMap, do not depend on GTK):
 
 GTK4-specific (the "glue" layer):
 - `main.c` — GtkApplication lifecycle, builds sidebar widget tree, wires signals/timers, owns AppState
-- `input.c` — translates GTK4 gestures/keys into camera operations and state changes
+- `input.c` — translates GTK4 gestures/keys into camera operations and state changes; uses callback (`swap_cb`) for actions requiring AppState access
 - `renderer.c` — manages all VAO/VBO GPU resources, compiles shaders, executes draw calls
 
 ### Sidebar Layout

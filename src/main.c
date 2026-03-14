@@ -123,6 +123,9 @@ typedef struct {
     char   center_name[64];
     char   target_name[64];
 
+    /* Startup detail (set from -d CLI arg, consumed in activate) */
+    const char *startup_detail;
+
     /* Paths */
     char   shader_dir[PATH_MAX];
 
@@ -187,6 +190,34 @@ static void str_upper(char *dst, size_t dst_sz, const char *src)
     for (i = 0; i < dst_sz - 1 && src[i]; i++)
         dst[i] = (char)toupper((unsigned char)src[i]);
     dst[i] = '\0';
+}
+
+/* Parse pipe-separated station detail string into sidebar labels.
+ * Format: "STN|FREQ|CTRY|SITE|LANG|TGT" */
+static void parse_station_detail(AppState *s, const char *detail)
+{
+    static const char *labels[] = {"STN", "FREQ", "CTRY", "SITE", "LANG", "TGT"};
+    char dbuf[256];
+    strncpy(dbuf, detail, sizeof(dbuf) - 1);
+    dbuf[sizeof(dbuf) - 1] = '\0';
+    char *field = dbuf;
+    int si_count = 0;
+    for (int i = 0; i < 6 && field; i++) {
+        char *next = strchr(field, '|');
+        if (next) *next = '\0';
+        if (*field) {
+            char upper[40];
+            str_upper(upper, sizeof(upper), field);
+            char info[48];
+            snprintf(info, sizeof(info), "%s: %s", labels[i], upper);
+            gtk_label_set_text(GTK_LABEL(s->lbl_station_info[si_count]), info);
+            gtk_widget_set_visible(s->lbl_station_info[si_count], TRUE);
+            si_count++;
+        }
+        field = next ? next + 1 : NULL;
+    }
+    for (int i = si_count; i < 6; i++)
+        gtk_widget_set_visible(s->lbl_station_info[i], FALSE);
 }
 
 static void km_to_pixel(const float *mvp, float kx, float ky,
@@ -942,29 +973,7 @@ static gboolean on_fifo_readable(GIOChannel *source, GIOCondition cond, gpointer
                 if (nlen >= sizeof(new_name)) nlen = sizeof(new_name) - 1;
                 memcpy(new_name, p, nlen);
                 new_name[nlen] = '\0';
-                /* Parse station detail fields */
-                static const char *labels[] = {"STN", "FREQ", "CTRY", "SITE", "LANG", "TGT"};
-                char dbuf[256];
-                strncpy(dbuf, pipe + 1, sizeof(dbuf) - 1);
-                dbuf[sizeof(dbuf) - 1] = '\0';
-                char *field = dbuf;
-                int si_count = 0;
-                for (int i = 0; i < 6 && field; i++) {
-                    char *next = strchr(field, '|');
-                    if (next) *next = '\0';
-                    if (*field) {
-                        char upper[40];
-                        str_upper(upper, sizeof(upper), field);
-                        char info[48];
-                        snprintf(info, sizeof(info), "%s: %s", labels[i], upper);
-                        gtk_label_set_text(GTK_LABEL(s->lbl_station_info[si_count]), info);
-                        gtk_widget_set_visible(s->lbl_station_info[si_count], TRUE);
-                        si_count++;
-                    }
-                    field = next ? next + 1 : NULL;
-                }
-                for (int i = si_count; i < 6; i++)
-                    gtk_widget_set_visible(s->lbl_station_info[i], FALSE);
+                parse_station_detail(s, pipe + 1);
             } else {
                 strncpy(new_name, p, sizeof(new_name) - 1);
                 new_name[sizeof(new_name) - 1] = '\0';
@@ -1053,6 +1062,67 @@ static void on_proj_toggle(GtkToggleButton *btn, gpointer data)
     }
 
     gtk_widget_queue_draw(s->gl_area);
+}
+
+/* Swap source (QTH) ↔ target, triggered by 'x' key */
+static void on_swap_source_target(InputState *is, void *user_data)
+{
+    AppState *s = (AppState *)user_data;
+
+    /* Swap coordinates */
+    double tmp;
+    tmp = s->qth_lat;  s->qth_lat  = s->target_lat; s->target_lat = tmp;
+    tmp = s->qth_lon;  s->qth_lon  = s->target_lon; s->target_lon = tmp;
+
+    /* Swap names */
+    char tmp_name[64];
+    memcpy(tmp_name, s->center_name, sizeof(tmp_name));
+    memcpy(s->center_name, s->target_name, sizeof(s->center_name));
+    memcpy(s->target_name, tmp_name, sizeof(s->target_name));
+
+    /* Rebuild labels */
+    build_label(s->center_label, sizeof(s->center_label),
+                s->center_name, s->qth_lat, s->qth_lon);
+    build_label(s->target_label, sizeof(s->target_label),
+                s->target_name, s->target_lat, s->target_lon);
+
+    /* Update input state — new QTH becomes new projection center & home */
+    is->center_lat = s->qth_lat;
+    is->center_lon = s->qth_lon;
+    is->original_center_lat = s->qth_lat;
+    is->original_center_lon = s->qth_lon;
+    camera_reset(&s->cam);
+
+    /* Reproject everything from the new center */
+    projection_set_center(is->center_lat, is->center_lon);
+    if (s->gl_initialized) {
+        gtk_gl_area_make_current(GTK_GL_AREA(s->gl_area));
+        renderer_upload_earth_circle(&s->renderer, projection_get_radius());
+        reproject_all(s);
+        update_target_geometry(s, 1);
+        projection_forward(90.0, 0.0, &s->npx, &s->npy);
+
+        if (projection_get_mode() == PROJ_ORTHO)
+            grid_build_geo(&s->grid);
+        else
+            grid_build(&s->grid);
+        renderer_upload_grid(&s->renderer, &s->grid);
+        grid_build_dist_circles(&s->dist_circles, s->qth_lat, s->qth_lon);
+        renderer_upload_dist_circles(&s->renderer, &s->dist_circles);
+
+        /* Rebuild night overlay for new projection center */
+        time_t now = time(NULL);
+        s->last_sun_update = now;
+        SubsolarPoint sun = solar_subsolar_point(now);
+        nightmesh_build(&s->nightmesh, &sun);
+        renderer_upload_night(&s->renderer, s->nightmesh.vertices,
+                              s->nightmesh.vertex_count);
+    }
+
+    update_sidebar_labels(s);
+    gtk_widget_queue_draw(s->gl_area);
+    printf("Swapped: Center %.4f, %.4f ↔ Target %.4f, %.4f\n",
+           s->qth_lat, s->qth_lon, s->target_lat, s->target_lon);
 }
 
 static void on_home_clicked(GtkButton *btn, gpointer data)
@@ -1278,6 +1348,10 @@ static void activate(GtkApplication *app, gpointer user_data)
         gtk_widget_set_visible(s->lbl_station_info[i], FALSE);
         gtk_box_append(GTK_BOX(sidebar), s->lbl_station_info[i]);
     }
+    if (s->startup_detail) {
+        parse_station_detail(s, s->startup_detail);
+        s->startup_detail = NULL;
+    }
 
     /* Distance / azimuth labels */
     s->lbl_dist = gtk_label_new("");
@@ -1415,6 +1489,8 @@ static void activate(GtkApplication *app, gpointer user_data)
     /* Input controllers */
     input_init(&s->input, s->gl_area, s->window,
                &s->cam, s->qth_lat, s->qth_lon);
+    s->input.swap_cb = on_swap_source_target;
+    s->input.swap_cb_data = s;
 
     /* Timers */
     s->clock_timer_id = g_timeout_add_seconds(1, on_clock_tick, s);
@@ -1624,6 +1700,7 @@ int main(int argc, char **argv)
     s->target_lon = target_lon;
     if (center_name) strncpy(s->center_name, center_name, sizeof(s->center_name) - 1);
     if (target_name) strncpy(s->target_name, target_name, sizeof(s->target_name) - 1);
+    s->startup_detail = detail_arg;
 
     /* Project — use QTH for center marker, not panned view center */
     projection_forward(s->qth_lat, s->qth_lon, &s->cx, &s->cy);
@@ -1703,7 +1780,6 @@ int main(int argc, char **argv)
     int status = g_application_run(G_APPLICATION(s->app), 0, NULL);
     g_object_unref(s->app);
 
-    (void)detail_arg; /* TODO: parse station detail into sidebar labels at startup */
 
     return status;
 }

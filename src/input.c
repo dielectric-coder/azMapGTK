@@ -156,6 +156,11 @@ static gboolean on_key_pressed(GtkEventControllerKey *ctrl,
         is->center_dirty = 1;
         gtk_widget_queue_draw(is->gl_area);
         return TRUE;
+    case GDK_KEY_x:
+    case GDK_KEY_X:
+        if (is->swap_cb)
+            is->swap_cb(is, is->swap_cb_data);
+        return TRUE;
     case GDK_KEY_q:
     case GDK_KEY_Q:
     case GDK_KEY_Escape: {

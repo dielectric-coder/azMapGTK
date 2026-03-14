@@ -10,7 +10,12 @@
 #include <gtk/gtk.h>
 #include "camera.h"
 
-typedef struct {
+typedef struct InputState InputState;
+
+/* Callback for swapping source ↔ target (triggered by 'x' key) */
+typedef void (*InputSwapCallback)(InputState *is, void *user_data);
+
+struct InputState {
     Camera *cam;
     GtkWidget *gl_area;
     int     dragging;
@@ -21,7 +26,9 @@ typedef struct {
     double  center_lat, center_lon;
     double  original_center_lat, original_center_lon;
     int     center_dirty;
-} InputState;
+    InputSwapCallback swap_cb;
+    void             *swap_cb_data;
+};
 
 /* Initialize input state and install GTK4 event controllers on the GL area. */
 void input_init(InputState *is, GtkWidget *gl_area, GtkWidget *window,

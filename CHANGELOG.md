@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.2 — 2026-03-14
+
+### Added
+
+- Swap source/target with `X` key — exchanges QTH and target, recenters projection on new QTH
+- Station detail (`-d` flag) now displayed in sidebar on startup (was previously ignored)
+
+### Fixed
+
+- X-ray flare class always showing `--` — API returns a JSON array, parser now extracts first element
+- FIFO station detail parsing refactored into shared helper (no behavior change)
+
 ## v0.1.1 — 2026-03-12
 
 ### Fixed

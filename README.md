@@ -102,6 +102,7 @@ qrz_pass = yourpassword
 | Drag | Pan (camera) | Rotate globe |
 | Arrow keys | Pan (camera) | Rotate globe |
 | R | Reset view | Reset view |
+| X | Swap source (QTH) ↔ target | Swap source (QTH) ↔ target |
 | HOME button | Recenter (keep zoom) | Recenter (keep zoom) |
 | Q / Esc | Quit | Quit |
 
