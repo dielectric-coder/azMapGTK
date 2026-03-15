@@ -11,6 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 /* Trim leading and trailing whitespace in-place, return pointer into buf. */
 static char *trim(char *s)
@@ -212,9 +215,12 @@ int config_save_state(double target_lat, double target_lon, const char *target_n
         }
     }
 
-    /* Write back */
-    f = fopen(path, "w");
-    if (!f) return -1;
+    /* Write back — use open()+fdopen() to enforce 0600 permissions,
+     * since the file may contain QRZ credentials. */
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return -1;
+    f = fdopen(fd, "w");
+    if (!f) { close(fd); return -1; }
     for (int li = 0; li < nlines; li++)
         fprintf(f, "%s\n", lines[li]);
     fclose(f);

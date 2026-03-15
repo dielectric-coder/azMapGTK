@@ -50,14 +50,18 @@ static int load_raw(MapData *md, const char *shp_path)
     }
 
     /* Allocate raw storage */
-    free(md->raw_lats);
-    free(md->raw_lons);
-    md->raw_lats = malloc(total * sizeof(double));
-    md->raw_lons = malloc(total * sizeof(double));
-    if (!md->raw_lats || !md->raw_lons) {
+    double *new_lats = malloc(total * sizeof(double));
+    double *new_lons = malloc(total * sizeof(double));
+    if (!new_lats || !new_lons) {
+        free(new_lats);
+        free(new_lons);
         SHPClose(shp);
         return -1;
     }
+    free(md->raw_lats);
+    free(md->raw_lons);
+    md->raw_lats = new_lats;
+    md->raw_lons = new_lons;
 
     /* Second pass: read vertices */
     md->raw_count = 0;

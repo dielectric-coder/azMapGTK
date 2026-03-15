@@ -111,7 +111,7 @@ int muf_parse_geojson(const char *json_str, MufData *m)
     if (!cJSON_IsArray(features)) { cJSON_Delete(root); return -1; }
 
     /* First pass: count total coordinates across all LineString features */
-    int total_coords = 0;
+    long total_coords = 0;
     int total_segs = 0;
     cJSON *feat;
     cJSON_ArrayForEach(feat, features) {
@@ -128,20 +128,24 @@ int muf_parse_geojson(const char *json_str, MufData *m)
         total_segs++;
     }
 
-    if (total_coords == 0 || total_segs == 0) {
+    if (total_coords <= 0 || total_segs == 0 || total_coords > 10000000L) {
         cJSON_Delete(root);
         return -1;
     }
 
     /* Allocate raw storage */
-    free(m->raw_lats);
-    free(m->raw_lons);
-    m->raw_lats = malloc(total_coords * sizeof(double));
-    m->raw_lons = malloc(total_coords * sizeof(double));
-    if (!m->raw_lats || !m->raw_lons) {
+    double *new_lats = malloc((size_t)total_coords * sizeof(double));
+    double *new_lons = malloc((size_t)total_coords * sizeof(double));
+    if (!new_lats || !new_lons) {
+        free(new_lats);
+        free(new_lons);
         cJSON_Delete(root);
         return -1;
     }
+    free(m->raw_lats);
+    free(m->raw_lons);
+    m->raw_lats = new_lats;
+    m->raw_lons = new_lons;
 
     /* Second pass: extract coordinates, colors, and legend entries */
     m->raw_count = 0;

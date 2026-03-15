@@ -122,8 +122,8 @@ void renderer_upload_map(Renderer *r, const MapData *md)
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
     glBindVertexArray(0);
 
-    r->map_num_segments = md->num_segments;
-    for (int i = 0; i < md->num_segments; i++) {
+    r->map_num_segments = md->num_segments < MAX_SEGMENTS ? md->num_segments : MAX_SEGMENTS;
+    for (int i = 0; i < r->map_num_segments; i++) {
         r->map_segment_starts[i] = md->segment_starts[i];
         r->map_segment_counts[i] = md->segment_counts[i];
     }
@@ -143,8 +143,8 @@ void renderer_upload_borders(Renderer *r, const MapData *md)
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
     glBindVertexArray(0);
 
-    r->border_num_segments = md->num_segments;
-    for (int i = 0; i < md->num_segments; i++) {
+    r->border_num_segments = md->num_segments < MAX_SEGMENTS ? md->num_segments : MAX_SEGMENTS;
+    for (int i = 0; i < r->border_num_segments; i++) {
         r->border_segment_starts[i] = md->segment_starts[i];
         r->border_segment_counts[i] = md->segment_counts[i];
     }
@@ -164,8 +164,8 @@ void renderer_upload_land(Renderer *r, const MapData *md)
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
     glBindVertexArray(0);
 
-    r->land_num_segments = md->num_segments;
-    for (int i = 0; i < md->num_segments; i++) {
+    r->land_num_segments = md->num_segments < MAX_SEGMENTS ? md->num_segments : MAX_SEGMENTS;
+    for (int i = 0; i < r->land_num_segments; i++) {
         r->land_segment_starts[i] = md->segment_starts[i];
         r->land_segment_counts[i] = md->segment_counts[i];
         r->land_segment_clamped[i] = md->segment_clamped[i];
@@ -321,8 +321,8 @@ void renderer_upload_grid(Renderer *r, const MapData *md)
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
     glBindVertexArray(0);
 
-    r->grid_num_segments = md->num_segments;
-    for (int i = 0; i < md->num_segments; i++) {
+    r->grid_num_segments = md->num_segments < MAX_SEGMENTS ? md->num_segments : MAX_SEGMENTS;
+    for (int i = 0; i < r->grid_num_segments; i++) {
         r->grid_segment_starts[i] = md->segment_starts[i];
         r->grid_segment_counts[i] = md->segment_counts[i];
     }
@@ -342,8 +342,8 @@ void renderer_upload_dist_circles(Renderer *r, const MapData *md)
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
     glBindVertexArray(0);
 
-    r->dist_num_segments = md->num_segments;
-    for (int i = 0; i < md->num_segments; i++) {
+    r->dist_num_segments = md->num_segments < MAX_SEGMENTS ? md->num_segments : MAX_SEGMENTS;
+    for (int i = 0; i < r->dist_num_segments; i++) {
         r->dist_segment_starts[i] = md->segment_starts[i];
         r->dist_segment_counts[i] = md->segment_counts[i];
     }
@@ -436,8 +436,8 @@ void renderer_upload_muf(Renderer *r, const MufData *m)
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
     glBindVertexArray(0);
 
-    r->muf_num_segments = m->num_segments;
-    for (int i = 0; i < m->num_segments; i++) {
+    r->muf_num_segments = m->num_segments < MUF_MAX_SEGMENTS ? m->num_segments : MUF_MAX_SEGMENTS;
+    for (int i = 0; i < r->muf_num_segments; i++) {
         r->muf_segment_starts[i] = m->segment_starts[i];
         r->muf_segment_counts[i] = m->segment_counts[i];
         memcpy(r->muf_segment_colors[i], m->segment_colors[i], 4 * sizeof(float));
@@ -458,8 +458,8 @@ void renderer_upload_spore(Renderer *r, const MufData *m)
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
     glBindVertexArray(0);
 
-    r->spore_num_segments = m->num_segments;
-    for (int i = 0; i < m->num_segments; i++) {
+    r->spore_num_segments = m->num_segments < MUF_MAX_SEGMENTS ? m->num_segments : MUF_MAX_SEGMENTS;
+    for (int i = 0; i < r->spore_num_segments; i++) {
         r->spore_segment_starts[i] = m->segment_starts[i];
         r->spore_segment_counts[i] = m->segment_counts[i];
         memcpy(r->spore_segment_colors[i], m->segment_colors[i], 4 * sizeof(float));

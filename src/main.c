@@ -1036,7 +1036,9 @@ static gboolean on_fifo_readable(GIOChannel *source, GIOCondition cond, gpointer
 
     double new_lat, new_lon;
     char new_name[64] = {0};
-    if (sscanf(line, "%lf,%lf,", &new_lat, &new_lon) == 2) {
+    if (sscanf(line, "%lf,%lf,", &new_lat, &new_lon) == 2 &&
+        new_lat >= -90.0 && new_lat <= 90.0 &&
+        new_lon >= -180.0 && new_lon <= 180.0) {
         char *p = strchr(line, ',');
         if (p) p = strchr(p + 1, ',');
         if (p && *(p + 1)) {
@@ -1274,13 +1276,14 @@ static void on_drap_toggle(GtkToggleButton *btn, gpointer data)
 static void format_age(char *buf, size_t len, time_t ts, time_t now)
 {
     if (ts == 0) { snprintf(buf, len, "--"); return; }
-    int age = (int)(now - ts);
+    long age = (long)(now - ts);
+    if (age < 0) age = 0;
     if (age < 60)
-        snprintf(buf, len, "%ds", age);
+        snprintf(buf, len, "%lds", age);
     else if (age < 3600)
-        snprintf(buf, len, "%dm%ds", age / 60, age % 60);
+        snprintf(buf, len, "%ldm%lds", age / 60, age % 60);
     else
-        snprintf(buf, len, "%dh%dm", age / 3600, (age % 3600) / 60);
+        snprintf(buf, len, "%ldh%ldm", age / 3600, (age % 3600) / 60);
 }
 
 static void on_data_btn_clicked(GtkButton *btn, gpointer data)
@@ -1660,9 +1663,14 @@ static void activate(GtkApplication *app, gpointer user_data)
     unlink(fifo_path);  /* remove stale entry so mkfifo succeeds */
     s->fifo_fd = -1;
     if (mkfifo(fifo_path, 0600) == 0) {
-        struct stat st;
-        if (lstat(fifo_path, &st) == 0 && S_ISFIFO(st.st_mode))
-            s->fifo_fd = open(fifo_path, O_RDWR | O_NONBLOCK);
+        int fd = open(fifo_path, O_RDWR | O_NONBLOCK);
+        if (fd >= 0) {
+            struct stat st;
+            if (fstat(fd, &st) == 0 && S_ISFIFO(st.st_mode))
+                s->fifo_fd = fd;
+            else
+                close(fd);
+        }
     }
     if (s->fifo_fd >= 0) {
         GIOChannel *fifo_chan = g_io_channel_unix_new(s->fifo_fd);
@@ -1703,18 +1711,19 @@ static void on_shutdown(GtkApplication *app, gpointer data)
         unlink(fp);
     }
 
-    if (s->muf_fetching) fetch_cleanup(&s->muf_fetch);
-    if (s->spore_fetching) fetch_cleanup(&s->spore_fetch);
-    if (s->aurora_fetching) fetch_cleanup(&s->aurora_fetch);
-    if (s->drap_fetching) fetch_cleanup(&s->drap_fetch);
-    if (s->kp_fetching) fetch_cleanup(&s->kp_fetch);
-    if (s->bz_fetching) fetch_cleanup(&s->bz_fetch);
-    if (s->solar_fetching) fetch_cleanup(&s->solar_fetch);
-    if (s->sfu_fetching) fetch_cleanup(&s->sfu_fetch);
-    if (s->scales_fetching) fetch_cleanup(&s->scales_fetch);
-    if (s->xray_fetching) fetch_cleanup(&s->xray_fetch);
-    if (s->wind_fetching) fetch_cleanup(&s->wind_fetch);
-    if (s->discuss_fetching) fetch_cleanup(&s->discuss_fetch);
+    /* Clean up all fetch requests — fetch_cleanup joins thread if still active */
+    fetch_cleanup(&s->muf_fetch);
+    fetch_cleanup(&s->spore_fetch);
+    fetch_cleanup(&s->aurora_fetch);
+    fetch_cleanup(&s->drap_fetch);
+    fetch_cleanup(&s->kp_fetch);
+    fetch_cleanup(&s->bz_fetch);
+    fetch_cleanup(&s->solar_fetch);
+    fetch_cleanup(&s->sfu_fetch);
+    fetch_cleanup(&s->scales_fetch);
+    fetch_cleanup(&s->xray_fetch);
+    fetch_cleanup(&s->wind_fetch);
+    fetch_cleanup(&s->discuss_fetch);
 
     if (s->has_qrz) qrz_cleanup();
     map_data_free(&s->map);

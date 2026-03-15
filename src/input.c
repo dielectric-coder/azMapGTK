@@ -72,7 +72,9 @@ static void on_drag_update(GtkGestureDrag *gesture, double off_x, double off_y, 
     } else {
         /* ORTHO: rotate globe by changing projection center */
         double dlat = dy_km / (EARTH_R * DEG2RAD);
-        double dlon = dx_km / (EARTH_R * DEG2RAD * cos(is->center_lat * DEG2RAD));
+        double cos_lat = cos(is->center_lat * DEG2RAD);
+        if (fabs(cos_lat) < 1e-10) cos_lat = 1e-10;
+        double dlon = dx_km / (EARTH_R * DEG2RAD * cos_lat);
 
         is->center_lat += dlat;
         is->center_lon += dlon;

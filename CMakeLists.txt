@@ -63,12 +63,20 @@ target_link_libraries(azmap-gtk PRIVATE
 
 target_compile_definitions(azmap-gtk PRIVATE
     AZMAP_VERSION="${PROJECT_VERSION}"
+    $<$<NOT:$<CONFIG:Debug>>:_FORTIFY_SOURCE=2>
 )
 
 target_compile_options(azmap-gtk PRIVATE
     ${GTK4_CFLAGS_OTHER}
     ${EPOXY_CFLAGS_OTHER}
     -Wall -Wextra
+    -fstack-protector-strong
+    -fstack-clash-protection
+    -Wformat -Wformat-security -Werror=format-security
+)
+
+target_link_options(azmap-gtk PRIVATE
+    -Wl,-z,relro,-z,now
 )
 
 # Copy shaders to build directory

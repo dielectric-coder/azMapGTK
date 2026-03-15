@@ -89,6 +89,9 @@ static int http_get(const char *url, Buffer *buf)
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, buf);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
     CURLcode res = curl_easy_perform(curl);
     curl_easy_cleanup(curl);
     if (res != CURLE_OK) {
@@ -176,11 +179,13 @@ int qrz_lookup(const char *callsign, QRZResult *result, char *err_buf, int err_s
         if (err_buf) snprintf(err_buf, err_sz, "CURL INIT FAILED");
         return -1;
     }
+    char *esc_key = curl_easy_escape(enc, session_key, 0);
     char *esc_call = curl_easy_escape(enc, call_upper, 0);
     char url[512];
     snprintf(url, sizeof(url),
              "https://xmldata.qrz.com/xml/current/?s=%s;callsign=%s",
-             session_key, esc_call ? esc_call : "");
+             esc_key ? esc_key : "", esc_call ? esc_call : "");
+    curl_free(esc_key);
     curl_free(esc_call);
     curl_easy_cleanup(enc);
 
@@ -280,5 +285,7 @@ int qrz_lookup(const char *callsign, QRZResult *result, char *err_buf, int err_s
 
 void qrz_cleanup(void)
 {
+    explicit_bzero(qrz_pass, sizeof(qrz_pass));
+    explicit_bzero(session_key, sizeof(session_key));
     curl_global_cleanup();
 }
