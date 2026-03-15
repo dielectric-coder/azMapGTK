@@ -84,7 +84,7 @@ GTK4-specific (the "glue" layer):
 The sidebar (`SIDEBAR_WIDTH` = 260px) is a vertical GtkBox with sections separated by styled separators:
 - **Clock** — UTC and local time labels
 - **Station info** — DIST, AZ TO, AZ FROM (visible when target set)
-- **Propagation indices** — Kp/Bz, SFU/SSN, X-ray flare class, NOAA scales, and DRAP peak (always visible, fetched independently of overlay toggles)
+- **Propagation indices** — Kp/Bz, SFU/SSN, X-ray flare class, NOAA scales, DRAP peak, solar wind speed, and CH HSS status (always visible, fetched independently of overlay toggles)
 - **Legends** — color-coded E's (foEs MHz), MUF (MHz), and DRAP level legends; rebuilt dynamically via `rebuild_legends()` when overlay data arrives
 - **SOURCE** — QRZ callsign lookup toggle button (highlights when station info originates from QRZ; auto-deactivates when another source updates station info)
 - **LAYERS** — toggle buttons for Aurora, E's, MUF, DRAP overlays
@@ -96,5 +96,5 @@ Button groups (SOURCE, LAYERS, MAP) use half-sidebar-width centered containers. 
 
 - All geometry uses the `MapData` struct with parallel arrays: `vertices[]` (interleaved x,y floats), `segment_starts[]`, `segment_counts[]`. Upload functions copy these into GPU buffers.
 - Projection changes require full vertex recalculation: `map_data_project()` → `renderer_upload_*()` for every layer. Switching back to azimuthal mode also resets the camera view and rebuilds the night overlay immediately.
-- Overlays (MUF, Aurora, etc.) are fetched asynchronously. `fetch.c` runs curl in a background thread; completion callbacks run on the main thread via `g_idle_add()` and update overlay state + re-upload. Kp/Bz, SFU/SSN, and DRAP data are fetched unconditionally (not gated on overlay toggle).
+- Overlays (MUF, Aurora, etc.) are fetched asynchronously. `fetch.c` runs curl in a background thread; completion callbacks run on the main thread via `g_idle_add()` and update overlay state + re-upload. Kp/Bz, SFU/SSN, DRAP, solar wind speed, and CH HSS data are fetched unconditionally (not gated on overlay toggle).
 - The renderer uses epoxy (not GLEW) for GL function loading, matching GTK4's requirements.

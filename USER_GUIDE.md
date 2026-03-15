@@ -140,6 +140,8 @@ Always visible, fetched automatically on startup regardless of overlay toggles:
 - **X-ray flare class** — Current GOES X-ray flare classification (e.g., C1.2, M5.0, X1.0)
 - **DRAP peak** — D-region absorption peak frequency (MHz)
 - **R/S/G** — NOAA Space Weather Scales (Radio blackout / Solar radiation storm / Geomagnetic storm, 0-5)
+- **SW** — Solar wind speed (km/s)
+- **CH HSS** — Coronal Hole High Speed Stream status: "CH HSS" = currently active, "CH HSS exp" = expected in forecast period (parsed from SWPC discussion text)
 
 ### Legends
 Color-coded legends appear dynamically when overlay data is loaded:
@@ -188,6 +190,8 @@ Propagation and space weather data is fetched from:
 | Solar indices (SFU/SSN) | NOAA SWPC | `services.swpc.noaa.gov` |
 | NOAA scales (R/S/G) | NOAA SWPC | `services.swpc.noaa.gov` |
 | X-ray flares | NOAA SWPC (GOES) | `services.swpc.noaa.gov` |
+| Solar wind speed | NOAA SWPC | `services.swpc.noaa.gov` |
+| CH HSS prediction | NOAA SWPC (discussion) | `services.swpc.noaa.gov` |
 | Callsign lookup | QRZ.com | `xmldata.qrz.com` |
 
 Data refreshes automatically on a timer. An internet connection is required for propagation overlays and indices; the map itself works offline with local shapefiles.

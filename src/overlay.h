@@ -11,6 +11,8 @@
 #ifndef OVERLAY_H
 #define OVERLAY_H
 
+#include <time.h>
+
 #define OVERLAY_UPDATE_SEC  900  /* 15 minutes */
 #define MUF_URL    "https://prop.kc2g.com/renders/current/mufd-normal-now.geojson"
 #define SPORE_URL  "https://prop.kc2g.com/api/stations.json"
@@ -19,8 +21,11 @@
 #define BZ_URL     "https://services.swpc.noaa.gov/products/summary/solar-wind-mag-field.json"
 #define DRAP_URL   "https://services.swpc.noaa.gov/text/drap_global_frequencies.txt"
 #define SOLAR_URL  "https://services.swpc.noaa.gov/text/daily-solar-indices.txt"
+#define SFU_URL    "https://services.swpc.noaa.gov/products/summary/10cm-flux.json"
 #define SCALES_URL "https://services.swpc.noaa.gov/products/noaa-scales.json"
 #define XRAY_URL   "https://services.swpc.noaa.gov/json/goes/primary/xray-flares-latest.json"
+#define WIND_URL   "https://services.swpc.noaa.gov/products/summary/solar-wind-speed.json"
+#define DISCUSS_URL "https://services.swpc.noaa.gov/text/discussion.txt"
 
 #define MUF_MAX_SEGMENTS 256
 #define MUF_MAX_LEGEND   16
@@ -53,6 +58,7 @@ typedef struct {
     /* Legend: unique (mhz, color) pairs for sidebar display */
     MufLegendEntry legend[MUF_MAX_LEGEND];
     int            legend_count;
+    time_t         ts;             /* source timestamp (spore stations) */
 } MufData;
 
 /* Aurora heatmap mesh (same vertex format as NightMesh: x, y, alpha) */
@@ -66,6 +72,7 @@ typedef struct {
 typedef struct {
     int    *values;     /* aurora probability 0-100, indexed [lon * 181 + (lat+90)] */
     int     valid;      /* 1 if data loaded successfully */
+    time_t  ts;         /* source observation time */
 } AuroraGrid;
 
 void  muf_data_init(MufData *m);
@@ -91,6 +98,7 @@ typedef struct {
     float *values;     /* HAF in MHz, row-major [row * DRAP_GRID_COLS + col] */
     float  peak_mhz;  /* peak HAF value across the grid */
     int    valid;
+    time_t ts;         /* source valid-at time */
 } DrapGrid;
 
 void  drap_grid_init(DrapGrid *g);
@@ -101,8 +109,10 @@ void  drap_mesh_build(AuroraMesh *m, const DrapGrid *g);
 /* Geomagnetic indices (Kp + Bz) */
 typedef struct {
     float kp;       /* Planetary K-index (0-9) */
-    float bz;       /* IMF Bz component (nT, negative = southward) */
-    int   valid;    /* 1 if data loaded */
+    float  bz;       /* IMF Bz component (nT, negative = southward) */
+    int    valid;    /* 1 if data loaded */
+    time_t ts_kp;    /* source timestamp for Kp */
+    time_t ts_bz;    /* source timestamp for Bz */
 } GeomagIndices;
 
 void  geomag_init(GeomagIndices *g);
@@ -112,19 +122,23 @@ int   geomag_parse_bz(const char *json_str, GeomagIndices *g);
 /* Solar indices (SFU + SSN) */
 typedef struct {
     int sfu;        /* 10.7 cm radio flux (Solar Flux Units) */
-    int ssn;        /* Sunspot number */
-    int valid;      /* 1 if data loaded */
+    int    ssn;        /* Sunspot number */
+    int    valid;      /* 1 if data loaded */
+    time_t ts_sfu;     /* source timestamp for SFU */
+    time_t ts_ssn;     /* source timestamp for SSN */
 } SolarIndices;
 
 void  solar_init(SolarIndices *s);
 int   solar_parse_text(const char *text, SolarIndices *s);
+int   sfu_parse_json(const char *json_str, SolarIndices *s);
 
 /* NOAA Space Weather Scales (R/S/G) */
 typedef struct {
     int r;          /* Radio Blackout level (0-5) */
     int s;          /* Solar Radiation Storm level (0-5) */
-    int g;          /* Geomagnetic Storm level (0-5) */
-    int valid;
+    int    g;          /* Geomagnetic Storm level (0-5) */
+    int    valid;
+    time_t ts;         /* source timestamp */
 } NoaaScales;
 
 void  scales_init(NoaaScales *sc);
@@ -132,11 +146,33 @@ int   scales_parse_json(const char *json_str, NoaaScales *sc);
 
 /* Latest X-ray flare class */
 typedef struct {
-    char max_class[8];   /* e.g. "M5.0", "X1.2", "C3.4" */
-    int  valid;
+    char   max_class[8];   /* e.g. "M5.0", "X1.2", "C3.4" */
+    int    valid;
+    time_t ts;             /* source timestamp */
 } XrayFlare;
 
 void  xray_init(XrayFlare *xf);
 int   xray_parse_json(const char *json_str, XrayFlare *xf);
+
+/* Solar wind speed */
+typedef struct {
+    int    speed;      /* km/s */
+    int    valid;
+    time_t ts;         /* source timestamp */
+} SolarWind;
+
+void  solarwind_init(SolarWind *w);
+int   solarwind_parse_json(const char *json_str, SolarWind *w);
+
+/* Coronal Hole HSS prediction (parsed from SWPC discussion text) */
+typedef struct {
+    int  active;    /* 1 if CH HSS currently influencing solar wind */
+    int    forecast;  /* 1 if CH HSS expected in forecast period */
+    int    valid;
+    time_t ts;         /* source issued time */
+} ChHss;
+
+void  chhss_init(ChHss *h);
+int   chhss_parse_discussion(const char *text, ChHss *h);
 
 #endif

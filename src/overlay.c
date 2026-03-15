@@ -12,10 +12,68 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <math.h>
 #include "overlay.h"
 #include "projection.h"
 #include "cJSON.h"
+
+/* ── Timestamp parsing helper ──────────────────────────────────── */
+
+/* Parse UTC timestamp string into time_t.  Accepts common SWPC formats:
+ *   "2026-03-14 18:29:00.000"      (summary JSONs)
+ *   "2026-03-14T18:30:00Z"         (ISO 8601)
+ *   "2026-03-14 18:29 UTC"         (DRAP text)
+ *   "2026 03 14"                   (daily-solar-indices date columns)
+ *   "2026 Mar 14 1230 UTC"         (discussion :Issued:)
+ * Returns 0 on failure. */
+static time_t parse_utc_timestamp(const char *s)
+{
+    if (!s) return 0;
+    struct tm tm = {0};
+
+    /* Try "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SSZ" */
+    if (sscanf(s, "%d-%d-%d%*c%d:%d:%d",
+               &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+               &tm.tm_hour, &tm.tm_min, &tm.tm_sec) >= 5) {
+        tm.tm_year -= 1900; tm.tm_mon -= 1;
+        return timegm(&tm);
+    }
+    /* Try "YYYY-MM-DD HH:MM UTC" (DRAP) */
+    if (sscanf(s, "%d-%d-%d %d:%d",
+               &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+               &tm.tm_hour, &tm.tm_min) == 5) {
+        tm.tm_year -= 1900; tm.tm_mon -= 1;
+        return timegm(&tm);
+    }
+    /* Try "YYYY Mon DD HHMM UTC" (discussion issued) */
+    {
+        char mon[4] = {0};
+        int hhmm;
+        if (sscanf(s, "%d %3s %d %d", &tm.tm_year, mon, &tm.tm_mday, &hhmm) == 4) {
+            static const char *months[] = {
+                "Jan","Feb","Mar","Apr","May","Jun",
+                "Jul","Aug","Sep","Oct","Nov","Dec"
+            };
+            tm.tm_mon = -1;
+            for (int i = 0; i < 12; i++) {
+                if (strncasecmp(mon, months[i], 3) == 0) { tm.tm_mon = i; break; }
+            }
+            if (tm.tm_mon < 0) return 0;
+            tm.tm_year -= 1900;
+            tm.tm_hour = hhmm / 100;
+            tm.tm_min = hhmm % 100;
+            return timegm(&tm);
+        }
+    }
+    /* Try "YYYY MM DD" (daily solar indices) */
+    if (sscanf(s, "%d %d %d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday) == 3 &&
+        tm.tm_year > 2000) {
+        tm.tm_year -= 1900; tm.tm_mon -= 1;
+        return timegm(&tm);
+    }
+    return 0;
+}
 
 /* ── MUF contour lines ─────────────────────────────────────────── */
 
@@ -336,6 +394,14 @@ int spore_parse_json(const char *json_str, MufData *m)
     double sta_lat[SPORE_MAX_STATIONS], sta_lon[SPORE_MAX_STATIONS];
     float sta_foes[SPORE_MAX_STATIONS];
     int nsta = 0;
+
+    /* Extract timestamp from first station entry */
+    cJSON *first = cJSON_GetArrayItem(root, 0);
+    if (first) {
+        cJSON *t = cJSON_GetObjectItem(first, "time");
+        if (t && cJSON_IsString(t))
+            m->ts = parse_utc_timestamp(t->valuestring);
+    }
 
     cJSON *item;
     cJSON_ArrayForEach(item, root) {
@@ -705,6 +771,10 @@ int aurora_parse_json(const char *json_str, AuroraGrid *g)
         g->values[lon * 181 + lat_idx] = val;
     }
 
+    cJSON *obs = cJSON_GetObjectItem(root, "Observation Time");
+    if (obs && cJSON_IsString(obs))
+        g->ts = parse_utc_timestamp(obs->valuestring);
+
     g->valid = 1;
     cJSON_Delete(root);
     return 0;
@@ -882,6 +952,17 @@ int drap_parse_text(const char *text, DrapGrid *g)
         if (!g->values) return -1;
     }
     memset(g->values, 0, grid_sz * sizeof(float));
+
+    /* Parse "# Product Valid At : 2026-03-14 18:29 UTC" */
+    const char *valid_at = strstr(text, "Product Valid At");
+    if (valid_at) {
+        const char *colon = strchr(valid_at, ':');
+        if (colon) {
+            colon++;
+            while (*colon == ' ') colon++;
+            g->ts = parse_utc_timestamp(colon);
+        }
+    }
 
     const char *p = text;
     int row = 0;
@@ -1130,6 +1211,10 @@ int geomag_parse_kp(const char *json_str, GeomagIndices *g)
     else if (kp_val && cJSON_IsNumber(kp_val))
         g->kp = (float)kp_val->valuedouble;
 
+    cJSON *ts_val = cJSON_GetArrayItem(last, 0);
+    if (ts_val && cJSON_IsString(ts_val))
+        g->ts_kp = parse_utc_timestamp(ts_val->valuestring);
+
     g->valid = 1;
     cJSON_Delete(root);
     return 0;
@@ -1146,6 +1231,10 @@ int geomag_parse_bz(const char *json_str, GeomagIndices *g)
         g->bz = (float)atof(bz_val->valuestring);
     else if (bz_val && cJSON_IsNumber(bz_val))
         g->bz = (float)bz_val->valuedouble;
+
+    cJSON *ts = cJSON_GetObjectItem(root, "TimeStamp");
+    if (ts && cJSON_IsString(ts))
+        g->ts_bz = parse_utc_timestamp(ts->valuestring);
 
     g->valid = 1;
     cJSON_Delete(root);
@@ -1185,14 +1274,36 @@ int solar_parse_text(const char *text, SolarIndices *s)
 
     if (!last_line) return -1;
 
-    int year, month, day, flux, ssn;
-    if (sscanf(last_line, "%d %d %d %d %d", &year, &month, &day, &flux, &ssn) == 5) {
-        s->sfu = flux;
+    int year, month, day, flux_unused, ssn;
+    if (sscanf(last_line, "%d %d %d %d %d", &year, &month, &day, &flux_unused, &ssn) == 5) {
+        /* SFU now comes from real-time 10cm-flux.json; only parse SSN here */
         s->ssn = ssn;
+        s->ts_ssn = parse_utc_timestamp(last_line);
         s->valid = 1;
         return 0;
     }
     return -1;
+}
+
+int sfu_parse_json(const char *json_str, SolarIndices *s)
+{
+    /* Format: {"Flux":"120","TimeStamp":"2026-03-13 20:00:00"} */
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root) return -1;
+
+    cJSON *flux = cJSON_GetObjectItem(root, "Flux");
+    if (flux && cJSON_IsString(flux) && flux->valuestring)
+        s->sfu = atoi(flux->valuestring);
+    else if (flux && cJSON_IsNumber(flux))
+        s->sfu = (int)flux->valuedouble;
+
+    cJSON *ts = cJSON_GetObjectItem(root, "TimeStamp");
+    if (ts && cJSON_IsString(ts))
+        s->ts_sfu = parse_utc_timestamp(ts->valuestring);
+
+    s->valid = 1;
+    cJSON_Delete(root);
+    return 0;
 }
 
 /* ── NOAA Space Weather Scales (R/S/G) ─────────────────────────── */
@@ -1227,8 +1338,113 @@ int xray_parse_json(const char *json_str, XrayFlare *xf)
         xf->valid = 1;
     }
 
+    cJSON *tt = item ? cJSON_GetObjectItem(item, "time_tag") : NULL;
+    if (tt && cJSON_IsString(tt))
+        xf->ts = parse_utc_timestamp(tt->valuestring);
+
     cJSON_Delete(root);
     return xf->valid ? 0 : -1;
+}
+
+/* ── Solar wind speed ───────────────────────────────────────────── */
+
+void solarwind_init(SolarWind *w)
+{
+    w->speed = 0;
+    w->valid = 0;
+}
+
+int solarwind_parse_json(const char *json_str, SolarWind *w)
+{
+    /* Format: {"WindSpeed":"675","TimeStamp":"2026-03-14 17:58:00.000"} */
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root) return -1;
+
+    cJSON *ws = cJSON_GetObjectItem(root, "WindSpeed");
+    if (ws && cJSON_IsString(ws) && ws->valuestring)
+        w->speed = atoi(ws->valuestring);
+    else if (ws && cJSON_IsNumber(ws))
+        w->speed = (int)ws->valuedouble;
+
+    cJSON *ts = cJSON_GetObjectItem(root, "TimeStamp");
+    if (ts && cJSON_IsString(ts))
+        w->ts = parse_utc_timestamp(ts->valuestring);
+
+    w->valid = (w->speed > 0);
+    cJSON_Delete(root);
+    return w->valid ? 0 : -1;
+}
+
+/* ── CH HSS prediction (from SWPC discussion text) ─────────────── */
+
+void chhss_init(ChHss *h)
+{
+    h->active = 0;
+    h->forecast = 0;
+    h->valid = 0;
+}
+
+/* Case-insensitive substring search */
+static const char *ci_strstr(const char *haystack, const char *needle)
+{
+    if (!haystack || !needle) return NULL;
+    size_t nlen = strlen(needle);
+    for (; *haystack; haystack++) {
+        if (strncasecmp(haystack, needle, nlen) == 0)
+            return haystack;
+    }
+    return NULL;
+}
+
+int chhss_parse_discussion(const char *text, ChHss *h)
+{
+    /* Look for "CH HSS" or "coronal hole" mentions in the Solar Wind
+     * and Geospace sections of the SWPC discussion text.
+     *
+     * Summary section (.24 hr Summary) → currently active
+     * Forecast section (.Forecast)     → expected */
+    if (!text) return -1;
+
+    h->active = 0;
+    h->forecast = 0;
+
+    /* Parse ":Issued: 2026 Mar 14 1230 UTC" */
+    const char *issued = ci_strstr(text, ":Issued:");
+    if (issued) {
+        issued += 8; /* skip ":Issued:" */
+        while (*issued == ' ') issued++;
+        h->ts = parse_utc_timestamp(issued);
+    }
+
+    /* Find the Solar Wind section */
+    const char *sw = ci_strstr(text, "Solar Wind");
+    if (!sw) { h->valid = 1; return 0; }  /* no section = no CH HSS info */
+
+    /* Find the next major section after Solar Wind (Geospace) */
+    const char *next_section = ci_strstr(sw + 10, "\nGeospace");
+    if (!next_section) next_section = text + strlen(text);
+
+    /* Within Solar Wind section, find summary and forecast */
+    const char *summary = ci_strstr(sw, ".24 hr Summary");
+    const char *forecast = ci_strstr(sw, ".Forecast");
+
+    /* Check summary for CH HSS / coronal hole */
+    if (summary && summary < next_section) {
+        const char *end = forecast ? forecast : next_section;
+        const char *m = ci_strstr(summary, "CH HSS");
+        if (!m || m >= end) m = ci_strstr(summary, "coronal hole");
+        if (m && m < end) h->active = 1;
+    }
+
+    /* Check forecast for CH HSS / coronal hole */
+    if (forecast && forecast < next_section) {
+        const char *m = ci_strstr(forecast, "CH HSS");
+        if (!m || m >= next_section) m = ci_strstr(forecast, "coronal hole");
+        if (m && m < next_section) h->forecast = 1;
+    }
+
+    h->valid = 1;
+    return 0;
 }
 
 int scales_parse_json(const char *json_str, NoaaScales *sc)
@@ -1260,6 +1476,15 @@ int scales_parse_json(const char *json_str, NoaaScales *sc)
         cJSON *v = cJSON_GetObjectItem(g_obj, "Scale");
         if (v && cJSON_IsString(v) && v->valuestring)
             sc->g = atoi(v->valuestring);
+    }
+
+    /* Timestamp: "DateStamp":"2026-03-14","TimeStamp":"18:31:00" */
+    cJSON *ds = cJSON_GetObjectItem(current, "DateStamp");
+    cJSON *ts = cJSON_GetObjectItem(current, "TimeStamp");
+    if (ds && cJSON_IsString(ds) && ts && cJSON_IsString(ts)) {
+        char combined[64];
+        snprintf(combined, sizeof(combined), "%s %s", ds->valuestring, ts->valuestring);
+        sc->ts = parse_utc_timestamp(combined);
     }
 
     sc->valid = 1;

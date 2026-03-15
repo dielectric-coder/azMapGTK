@@ -4,6 +4,8 @@
 
 ### Added
 
+- Solar wind speed (SW km/s) in sidebar from SWPC solar-wind-speed summary
+- Coronal Hole HSS status in sidebar — parsed from SWPC discussion text; shows "CH HSS" when active, "CH HSS exp" when forecast
 - Swap source/target with `X` key — exchanges QTH and target, recenters projection on new QTH
 - Station detail (`-d` flag) now displayed in sidebar on startup (was previously ignored)
 

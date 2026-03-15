@@ -69,7 +69,11 @@ typedef struct {
     GtkWidget *lbl_geomag;
     GtkWidget *lbl_solar;
     GtkWidget *lbl_drap_peak;
+    GtkWidget *lbl_wind;
     GtkWidget *legend_box;     /* container for E's/MUF/DRAP legends */
+    GtkWidget *btn_data;
+    GtkWidget *data_popover;
+    GtkWidget *data_popover_label;
 
     /* Core state */
     Renderer   renderer;
@@ -105,9 +109,16 @@ typedef struct {
     SolarIndices  solar;
     NoaaScales    scales;
     XrayFlare     xray;
-    FetchRequest  kp_fetch, bz_fetch, solar_fetch, scales_fetch, xray_fetch;
-    int           kp_fetching, bz_fetching, solar_fetching, scales_fetching, xray_fetching;
+    SolarWind     wind;
+    ChHss         chhss;
+    FetchRequest  kp_fetch, bz_fetch, solar_fetch, sfu_fetch, scales_fetch, xray_fetch;
+    FetchRequest  wind_fetch, discuss_fetch;
+    int           kp_fetching, bz_fetching, solar_fetching, sfu_fetching, scales_fetching, xray_fetching;
+    int           wind_fetching, discuss_fetching;
     time_t        last_geomag_fetch;
+
+    /* Last successful fetch time (for sources without embedded timestamps) */
+    time_t        ts_muf;
 
     /* Coordinates */
     double qth_lat, qth_lon;     /* original QTH from config/CLI — never changes */
@@ -381,6 +392,23 @@ static void update_sidebar_labels(AppState *s)
         else
             snprintf(line, sizeof(line), "DRAP -- MHz  %s", rsg);
         gtk_label_set_text(GTK_LABEL(s->lbl_drap_peak), line);
+    }
+
+    /* Solar wind speed + CH HSS — always visible */
+    {
+        char line[128];
+        const char *wind_str = s->wind.valid ?
+            (snprintf(buf, sizeof(buf), "SW %d km/s", s->wind.speed), buf) :
+            "SW -- km/s";
+        const char *hss_str = "";
+        if (s->chhss.valid) {
+            if (s->chhss.active)
+                hss_str = "  CH HSS";
+            else if (s->chhss.forecast)
+                hss_str = "  CH HSS exp";
+        }
+        snprintf(line, sizeof(line), "%s%s", wind_str, hss_str);
+        gtk_label_set_text(GTK_LABEL(s->lbl_wind), line);
     }
 }
 
@@ -749,6 +777,7 @@ static gboolean on_fetch_poll(gpointer data)
                     muf_data_free(&s->muf_data);
                     muf_data_init(&s->muf_data);
                     muf_parse_geojson(json, &s->muf_data);
+                    s->ts_muf = now;
                     free(json);
                     if (s->muf_active && s->muf_data.num_segments > 0) {
                         renderer_upload_muf(&s->renderer, &s->muf_data);
@@ -860,6 +889,17 @@ static gboolean on_fetch_poll(gpointer data)
             fetch_cleanup(&s->solar_fetch);
         }
     }
+    if (s->sfu_fetching) {
+        int st = fetch_check(&s->sfu_fetch);
+        if (st != 0) {
+            s->sfu_fetching = 0;
+            if (st == 1) {
+                char *json = fetch_take_response(&s->sfu_fetch);
+                if (json) { sfu_parse_json(json, &s->solar); free(json); }
+            }
+            fetch_cleanup(&s->sfu_fetch);
+        }
+    }
     if (s->scales_fetching) {
         int st = fetch_check(&s->scales_fetch);
         if (st != 0) {
@@ -880,6 +920,28 @@ static gboolean on_fetch_poll(gpointer data)
                 if (json) { xray_parse_json(json, &s->xray); free(json); }
             }
             fetch_cleanup(&s->xray_fetch);
+        }
+    }
+    if (s->wind_fetching) {
+        int st = fetch_check(&s->wind_fetch);
+        if (st != 0) {
+            s->wind_fetching = 0;
+            if (st == 1) {
+                char *json = fetch_take_response(&s->wind_fetch);
+                if (json) { solarwind_parse_json(json, &s->wind); free(json); }
+            }
+            fetch_cleanup(&s->wind_fetch);
+        }
+    }
+    if (s->discuss_fetching) {
+        int st = fetch_check(&s->discuss_fetch);
+        if (st != 0) {
+            s->discuss_fetching = 0;
+            if (st == 1) {
+                char *txt = fetch_take_response(&s->discuss_fetch);
+                if (txt) { chhss_parse_discussion(txt, &s->chhss); free(txt); }
+            }
+            fetch_cleanup(&s->discuss_fetch);
         }
     }
 
@@ -918,6 +980,10 @@ static gboolean on_fetch_poll(gpointer data)
             fetch_start(&s->solar_fetch, SOLAR_URL);
             s->solar_fetching = 1;
         }
+        if (!s->sfu_fetching) {
+            fetch_start(&s->sfu_fetch, SFU_URL);
+            s->sfu_fetching = 1;
+        }
         if (!s->scales_fetching) {
             fetch_start(&s->scales_fetch, SCALES_URL);
             s->scales_fetching = 1;
@@ -925,6 +991,14 @@ static gboolean on_fetch_poll(gpointer data)
         if (!s->xray_fetching) {
             fetch_start(&s->xray_fetch, XRAY_URL);
             s->xray_fetching = 1;
+        }
+        if (!s->wind_fetching) {
+            fetch_start(&s->wind_fetch, WIND_URL);
+            s->wind_fetching = 1;
+        }
+        if (!s->discuss_fetching) {
+            fetch_start(&s->discuss_fetch, DISCUSS_URL);
+            s->discuss_fetching = 1;
         }
         s->last_geomag_fetch = now;
     }
@@ -1197,6 +1271,67 @@ static void on_drap_toggle(GtkToggleButton *btn, gpointer data)
     }
 }
 
+static void format_age(char *buf, size_t len, time_t ts, time_t now)
+{
+    if (ts == 0) { snprintf(buf, len, "--"); return; }
+    int age = (int)(now - ts);
+    if (age < 60)
+        snprintf(buf, len, "%ds", age);
+    else if (age < 3600)
+        snprintf(buf, len, "%dm%ds", age / 60, age % 60);
+    else
+        snprintf(buf, len, "%dh%dm", age / 3600, (age % 3600) / 60);
+}
+
+static void on_data_btn_clicked(GtkButton *btn, gpointer data)
+{
+    (void)btn;
+    AppState *s = (AppState *)data;
+    time_t now = time(NULL);
+    char age[16];
+    char text[1024];
+    int pos = 0;
+
+    pos += snprintf(text + pos, sizeof(text) - pos,
+                    "%-12s  %5s  %s\n", "DATA", "AGE", "RATE");
+    pos += snprintf(text + pos, sizeof(text) - pos,
+                    "%-12s  %5s  %s\n", "----", "---", "----");
+
+    struct { const char *name; time_t ts; const char *rate; } rows[] = {
+        { "Kp",        s->geomag.ts_kp,       "15m" },
+        { "Bz",        s->geomag.ts_bz,       "15m" },
+        { "SFU",       s->solar.ts_sfu,       "15m" },
+        { "SSN",       s->solar.ts_ssn,       "15m" },
+        { "X-ray",     s->xray.ts,            "15m" },
+        { "R/S/G",     s->scales.ts,          "15m" },
+        { "SW speed",  s->wind.ts,            "15m" },
+        { "CH HSS",    s->chhss.ts,           "15m" },
+        { "DRAP",      s->drap_grid.ts,       "15m" },
+        { "MUF",       s->ts_muf,             "15m" },
+        { "E's",       s->spore_data.ts,      "15m" },
+        { "Aurora",    s->aurora_grid.ts,      "15m" },
+    };
+    int n = (int)(sizeof(rows) / sizeof(rows[0]));
+    for (int i = 0; i < n; i++) {
+        format_age(age, sizeof(age), rows[i].ts, now);
+        pos += snprintf(text + pos, sizeof(text) - pos,
+                        "%-12s  %5s  %s\n", rows[i].name, age, rows[i].rate);
+    }
+
+    gtk_label_set_text(GTK_LABEL(s->data_popover_label), text);
+    gtk_popover_popup(GTK_POPOVER(s->data_popover));
+}
+
+static void on_data_btn_destroy(GtkWidget *btn, gpointer data)
+{
+    (void)btn;
+    AppState *s = data;
+    if (s->data_popover) {
+        gtk_widget_unparent(s->data_popover);
+        s->data_popover = NULL;
+    }
+}
+
 static void on_qrz_btn_destroy(GtkWidget *btn, gpointer data)
 {
     (void)btn;
@@ -1280,6 +1415,8 @@ static void load_css(void)
         ".sidebar button:checked { background-color: #2a4570; border-color: #4a7ab5; color: #fff; }"
         ".btn-sep { background-color: #ffffff; min-height: 1px; margin: 6px 0; }"
         ".info-sep { background-color: #667788; min-height: 1px; margin: 6px 0; }"
+        "popover.data-popover > contents { background-color: #10101a; }"
+        "popover.data-popover label { font-family: monospace; font-size: 11px; color: #b3cce6; }"
         ".map-area { background-color: #0d0d1e; margin: 8px; }"
     );
     gtk_style_context_add_provider_for_display(
@@ -1382,6 +1519,25 @@ static void activate(GtkApplication *app, gpointer user_data)
     s->lbl_drap_peak = gtk_label_new("DRAP peak -- MHz");
     gtk_widget_add_css_class(s->lbl_drap_peak, "info-label");
     gtk_box_append(GTK_BOX(sidebar), s->lbl_drap_peak);
+
+    s->lbl_wind = gtk_label_new("SW -- km/s");
+    gtk_widget_add_css_class(s->lbl_wind, "info-label");
+    gtk_box_append(GTK_BOX(sidebar), s->lbl_wind);
+
+    /* DATA button + popover (between indices and legends) */
+    s->btn_data = gtk_button_new_with_label("DATA");
+    gtk_widget_set_halign(s->btn_data, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(s->btn_data, SIDEBAR_WIDTH / 2, -1);
+    gtk_box_append(GTK_BOX(sidebar), s->btn_data);
+
+    s->data_popover = gtk_popover_new();
+    gtk_widget_set_parent(s->data_popover, s->btn_data);
+    s->data_popover_label = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(s->data_popover_label), 0.0f);
+    gtk_widget_add_css_class(s->data_popover, "data-popover");
+    gtk_popover_set_child(GTK_POPOVER(s->data_popover), s->data_popover_label);
+    g_signal_connect(s->btn_data, "clicked", G_CALLBACK(on_data_btn_clicked), s);
+    g_signal_connect(s->btn_data, "destroy", G_CALLBACK(on_data_btn_destroy), s);
 
     GtkWidget *legend_sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_add_css_class(legend_sep, "info-sep");
@@ -1554,8 +1710,11 @@ static void on_shutdown(GtkApplication *app, gpointer data)
     if (s->kp_fetching) fetch_cleanup(&s->kp_fetch);
     if (s->bz_fetching) fetch_cleanup(&s->bz_fetch);
     if (s->solar_fetching) fetch_cleanup(&s->solar_fetch);
+    if (s->sfu_fetching) fetch_cleanup(&s->sfu_fetch);
     if (s->scales_fetching) fetch_cleanup(&s->scales_fetch);
     if (s->xray_fetching) fetch_cleanup(&s->xray_fetch);
+    if (s->wind_fetching) fetch_cleanup(&s->wind_fetch);
+    if (s->discuss_fetching) fetch_cleanup(&s->discuss_fetch);
 
     if (s->has_qrz) qrz_cleanup();
     map_data_free(&s->map);
@@ -1757,6 +1916,8 @@ int main(int argc, char **argv)
     solar_init(&s->solar);
     scales_init(&s->scales);
     xray_init(&s->xray);
+    solarwind_init(&s->wind);
+    chhss_init(&s->chhss);
 
     /* Text system */
     text_init();
