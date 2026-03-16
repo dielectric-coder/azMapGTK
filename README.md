@@ -131,4 +131,8 @@ src/
 
 ## License
 
-Same license as azMap.
+This project is licensed under the [GNU General Public License v2.0 or later](LICENSE) (GPL-2.0-or-later).
+
+Copyright (C) 2026 Michel Lachaine
+
+The bundled `cJSON` library (`src/cJSON.c`, `src/cJSON.h`) is licensed under the MIT License — see the file headers for details.

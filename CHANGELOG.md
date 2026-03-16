@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.3 — 2026-03-16
+
+### Added
+
+- LICENSE file (GNU General Public License v2.0 or later)
+- SPDX license identifiers and copyright headers in all source files, shaders, and CMakeLists.txt
+
 ## v0.1.2 — 2026-03-14
 
 ### Added

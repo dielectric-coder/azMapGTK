@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 Michel Lachaine
 #version 330 core
 
 layout(location = 0) in vec2 a_pos;

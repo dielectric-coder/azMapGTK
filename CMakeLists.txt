@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
 cmake_minimum_required(VERSION 3.16)
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)

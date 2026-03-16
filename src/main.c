@@ -1,3 +1,21 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Copyright (C) 2026 Michel Lachaine
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, see <https://www.gnu.org/licenses/>.
+ */
 /* main.c — GTK4 application entry point for azMapGTK.
  *
  * Replaces the GLFW main loop with a GtkApplication. The map is rendered
@@ -66,6 +84,12 @@ typedef struct {
     GtkWidget *btn_qrz;
     GtkWidget *qrz_entry;
     GtkWidget *qrz_popover;
+    GtkWidget *btn_target;
+    GtkWidget *target_popover;
+    GtkWidget *target_name_entry;
+    GtkWidget *target_lat_entry;
+    GtkWidget *target_lon_entry;
+    GtkWidget *lbl_source;
     GtkWidget *lbl_geomag;
     GtkWidget *lbl_solar;
     GtkWidget *lbl_drap_peak;
@@ -344,6 +368,13 @@ static void update_sidebar_labels(AppState *s)
     snprintf(buf, sizeof(buf), "LOC  %02d:%02d:%02d",
              lt->tm_hour, lt->tm_min, lt->tm_sec);
     gtk_label_set_text(GTK_LABEL(s->lbl_local), buf);
+
+    /* Source location */
+    if (s->lbl_source) {
+        char upper[128];
+        str_upper(upper, sizeof(upper), s->center_label);
+        gtk_label_set_text(GTK_LABEL(s->lbl_source), upper);
+    }
 
     if (s->dist > 0.0) {
         snprintf(buf, sizeof(buf), "DIST  %.1f KM", s->dist);
@@ -1398,6 +1429,53 @@ static void on_qrz_activate(GtkEntry *entry, gpointer data)
     gtk_popover_popdown(GTK_POPOVER(s->qrz_popover));
 }
 
+static void on_target_activate(GtkEntry *entry, gpointer data)
+{
+    (void)entry;
+    AppState *s = (AppState *)data;
+    const char *lat_str = gtk_editable_get_text(GTK_EDITABLE(s->target_lat_entry));
+    const char *lon_str = gtk_editable_get_text(GTK_EDITABLE(s->target_lon_entry));
+    const char *name_str = gtk_editable_get_text(GTK_EDITABLE(s->target_name_entry));
+
+    if (!lat_str || !lat_str[0] || !lon_str || !lon_str[0]) return;
+
+    double new_lat = atof(lat_str);
+    double new_lon = atof(lon_str);
+    if (new_lat < -90.0 || new_lat > 90.0 || new_lon < -180.0 || new_lon > 180.0)
+        return;
+
+    s->target_lat = new_lat;
+    s->target_lon = new_lon;
+    memset(s->target_name, 0, sizeof(s->target_name));
+    if (name_str && name_str[0])
+        strncpy(s->target_name, name_str, sizeof(s->target_name) - 1);
+    build_label(s->target_label, sizeof(s->target_label),
+                s->target_name, s->target_lat, s->target_lon);
+
+    if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(s->btn_qrz)))
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(s->btn_qrz), FALSE);
+
+    /* Clear station info labels */
+    for (int i = 0; i < 6; i++)
+        gtk_widget_set_visible(s->lbl_station_info[i], FALSE);
+
+    if (s->gl_initialized) {
+        gtk_gl_area_make_current(GTK_GL_AREA(s->gl_area));
+        update_target_geometry(s, 1);
+    }
+    update_sidebar_labels(s);
+    gtk_widget_queue_draw(s->gl_area);
+
+    gtk_popover_popdown(GTK_POPOVER(s->target_popover));
+}
+
+static void on_target_btn_destroy(GtkWidget *widget, gpointer data)
+{
+    (void)widget;
+    AppState *s = (AppState *)data;
+    gtk_widget_unparent(s->target_popover);
+}
+
 /* ── CSS styling ───────────────────────────────────────────────── */
 
 static void load_css(void)
@@ -1477,6 +1555,17 @@ static void activate(GtkApplication *app, gpointer user_data)
     s->lbl_local = gtk_label_new("LOC  --:--:--");
     gtk_widget_add_css_class(s->lbl_local, "clock");
     gtk_box_append(GTK_BOX(sidebar), s->lbl_local);
+
+    /* Source location label */
+    s->lbl_source = gtk_label_new("");
+    gtk_widget_add_css_class(s->lbl_source, "info-label");
+    gtk_label_set_xalign(GTK_LABEL(s->lbl_source), 0.0f);
+    {
+        char upper[128];
+        str_upper(upper, sizeof(upper), s->center_label);
+        gtk_label_set_text(GTK_LABEL(s->lbl_source), upper);
+    }
+    gtk_box_append(GTK_BOX(sidebar), s->lbl_source);
 
     /* Separator */
     gtk_box_append(GTK_BOX(sidebar), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
@@ -1582,6 +1671,41 @@ static void activate(GtkApplication *app, gpointer user_data)
     g_signal_connect_swapped(s->btn_qrz, "clicked",
                               G_CALLBACK(gtk_popover_popup), s->qrz_popover);
     g_signal_connect(s->btn_qrz, "destroy", G_CALLBACK(on_qrz_btn_destroy), s);
+
+    /* TARGET button + popover for manual coordinate entry */
+    s->btn_target = gtk_button_new_with_label("TARGET");
+    gtk_box_append(GTK_BOX(src_box), s->btn_target);
+
+    s->target_popover = gtk_popover_new();
+    gtk_widget_set_parent(s->target_popover, s->btn_target);
+    GtkWidget *tgt_grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(tgt_grid), 4);
+    gtk_grid_set_column_spacing(GTK_GRID(tgt_grid), 4);
+
+    s->target_name_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(s->target_name_entry), "Name");
+    gtk_widget_set_size_request(s->target_name_entry, 140, -1);
+    gtk_grid_attach(GTK_GRID(tgt_grid), s->target_name_entry, 0, 0, 2, 1);
+
+    GtkWidget *lat_lbl = gtk_label_new("Lat");
+    gtk_grid_attach(GTK_GRID(tgt_grid), lat_lbl, 0, 1, 1, 1);
+    s->target_lat_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(s->target_lat_entry), "-90..90");
+    gtk_grid_attach(GTK_GRID(tgt_grid), s->target_lat_entry, 1, 1, 1, 1);
+
+    GtkWidget *lon_lbl = gtk_label_new("Lon");
+    gtk_grid_attach(GTK_GRID(tgt_grid), lon_lbl, 0, 2, 1, 1);
+    s->target_lon_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(s->target_lon_entry), "-180..180");
+    gtk_grid_attach(GTK_GRID(tgt_grid), s->target_lon_entry, 1, 2, 1, 1);
+
+    gtk_popover_set_child(GTK_POPOVER(s->target_popover), tgt_grid);
+    g_signal_connect(s->target_lat_entry, "activate", G_CALLBACK(on_target_activate), s);
+    g_signal_connect(s->target_lon_entry, "activate", G_CALLBACK(on_target_activate), s);
+    g_signal_connect(s->target_name_entry, "activate", G_CALLBACK(on_target_activate), s);
+    g_signal_connect_swapped(s->btn_target, "clicked",
+                              G_CALLBACK(gtk_popover_popup), s->target_popover);
+    g_signal_connect(s->btn_target, "destroy", G_CALLBACK(on_target_btn_destroy), s);
 
     GtkWidget *src_sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_add_css_class(src_sep, "btn-sep");
