@@ -110,6 +110,14 @@ static int http_get(const char *url, Buffer *buf)
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    /* Restrict to HTTPS only */
+#if LIBCURL_VERSION_NUM >= 0x075500  /* 7.85.0 */
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "https");
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https");
+#else
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTPS);
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTPS);
+#endif
     CURLcode res = curl_easy_perform(curl);
     curl_easy_cleanup(curl);
     if (res != CURLE_OK) {
@@ -137,7 +145,9 @@ static int qrz_login(char *err_buf, int err_sz)
     curl_easy_cleanup(enc);
 
     Buffer buf;
-    if (http_get(url, &buf) != 0) {
+    int http_rc = http_get(url, &buf);
+    explicit_bzero(url, sizeof(url));
+    if (http_rc != 0) {
         if (err_buf) snprintf(err_buf, err_sz, "HTTP REQUEST FAILED");
         return -1;
     }
@@ -171,7 +181,6 @@ int qrz_init(const char *username, const char *password)
     strncpy(qrz_pass, password, sizeof(qrz_pass) - 1);
     qrz_pass[sizeof(qrz_pass) - 1] = '\0';
     session_key[0] = '\0';
-    curl_global_init(CURL_GLOBAL_DEFAULT);
     return 0;
 }
 
@@ -303,7 +312,7 @@ int qrz_lookup(const char *callsign, QRZResult *result, char *err_buf, int err_s
 
 void qrz_cleanup(void)
 {
+    explicit_bzero(qrz_user, sizeof(qrz_user));
     explicit_bzero(qrz_pass, sizeof(qrz_pass));
     explicit_bzero(session_key, sizeof(session_key));
-    curl_global_cleanup();
 }

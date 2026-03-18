@@ -58,7 +58,7 @@ void grid_build(MapData *md)
     for (int ri = 1; ri <= num_rings; ri++) {
         float r = (float)(ri * RING_STEP_KM);
         int start = md->vertex_count;
-        for (int i = 0; i <= CIRCLE_PTS; i++) {
+        for (int i = 0; i <= CIRCLE_PTS && md->vertex_count < max_verts; i++) {
             float a = 2.0f * (float)M_PI * i / CIRCLE_PTS;
             md->vertices[md->vertex_count * 2]     = r * cosf(a);
             md->vertices[md->vertex_count * 2 + 1] = r * sinf(a);
@@ -72,7 +72,7 @@ void grid_build(MapData *md)
     }
 
     /* Radial azimuth lines from center to edge */
-    for (int i = 0; i < num_radials; i++) {
+    for (int i = 0; i < num_radials && md->vertex_count + 2 <= max_verts; i++) {
         float a = 2.0f * (float)M_PI * i / num_radials;
         int start = md->vertex_count;
         md->vertices[md->vertex_count * 2]     = 0.0f;
@@ -109,7 +109,7 @@ void grid_build_geo(MapData *md)
     for (double lat = -60.0; lat <= 60.0 + 0.01; lat += GEO_LAT_STEP) {
         int seg_start = md->vertex_count;
         int in_seg = 0;
-        for (double lon = -180.0; lon <= 180.0 + 0.01; lon += GEO_SAMPLE_STEP) {
+        for (double lon = -180.0; lon <= 180.0 + 0.01 && md->vertex_count < max_verts; lon += GEO_SAMPLE_STEP) {
             double x, y;
             int rc = projection_forward(lat, lon, &x, &y);
             if (rc < 0) {
@@ -142,7 +142,7 @@ void grid_build_geo(MapData *md)
     for (double lon = -180.0; lon < 180.0 - 0.01; lon += GEO_LON_STEP) {
         int seg_start = md->vertex_count;
         int in_seg = 0;
-        for (double lat = -90.0; lat <= 90.0 + 0.01; lat += GEO_SAMPLE_STEP) {
+        for (double lat = -90.0; lat <= 90.0 + 0.01 && md->vertex_count < max_verts; lat += GEO_SAMPLE_STEP) {
             double x, y;
             int rc = projection_forward(lat, lon, &x, &y);
             if (rc < 0) {
@@ -204,7 +204,7 @@ void grid_build_dist_circles(MapData *md, double center_lat, double center_lon)
         int seg_start = md->vertex_count;
         int in_seg = 0;
 
-        for (int i = 0; i <= DIST_CIRCLE_PTS; i++) {
+        for (int i = 0; i <= DIST_CIRCLE_PTS && md->vertex_count < max_verts; i++) {
             double bearing = 2.0 * M_PI * i / DIST_CIRCLE_PTS;
             double dlat, dlon;
             geo_destination(clat, clon, dist_km, bearing, &dlat, &dlon);

@@ -220,6 +220,7 @@ double projection_distance(double lat1, double lon1, double lat2, double lon2)
     double a = sin(dlat / 2);
     double b = sin(dlon / 2);
     a = a * a + cos(lat1 * DEG2RAD) * cos(lat2 * DEG2RAD) * b * b;
+    if (a > 1.0) a = 1.0;
     return 2.0 * EARTH_RADIUS_KM * asin(sqrt(a));
 }
 

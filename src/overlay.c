@@ -255,7 +255,10 @@ void muf_reproject(MufData *m)
     if (m->raw_count == 0) return;
 
     /* Project all raw vertices */
-    float *proj = malloc(m->raw_count * 2 * sizeof(float));
+    size_t proj_alloc = (size_t)m->raw_count * 2 * sizeof(float);
+    if (m->raw_count <= 0 || proj_alloc / sizeof(float) / 2 != (size_t)m->raw_count)
+        return;
+    float *proj = malloc(proj_alloc);
     if (!proj) return;
     for (int i = 0; i < m->raw_count; i++) {
         double x, y;
@@ -782,9 +785,12 @@ int aurora_parse_json(const char *json_str, AuroraGrid *g)
         cJSON *j1 = cJSON_GetArrayItem(triplet, 1);
         cJSON *j2 = cJSON_GetArrayItem(triplet, 2);
         if (!j0 || !j1 || !j2) continue;
-        int lon = (int)j0->valuedouble;
-        int lat = (int)j1->valuedouble;
-        int val = (int)j2->valuedouble;
+        double dlon = j0->valuedouble, dlat = j1->valuedouble, dval = j2->valuedouble;
+        if (!isfinite(dlon) || !isfinite(dlat) || !isfinite(dval)) continue;
+        if (dlon < -1e9 || dlon > 1e9 || dlat < -1e9 || dlat > 1e9) continue;
+        int lon = (int)dlon;
+        int lat = (int)dlat;
+        int val = (int)dval;
 
         /* Normalize lon to 0-359 */
         lon = ((lon % 360) + 360) % 360;

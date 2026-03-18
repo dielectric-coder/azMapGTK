@@ -50,6 +50,7 @@
 #include "qrz.h"
 #include "overlay.h"
 #include "fetch.h"
+#include <curl/curl.h>
 
 #define SIDEBAR_WIDTH  260
 #define DEFAULT_WIDTH  (800 + SIDEBAR_WIDTH)
@@ -1807,7 +1808,7 @@ static void activate(GtkApplication *app, gpointer user_data)
     unlink(fifo_path);  /* remove stale entry so mkfifo succeeds */
     s->fifo_fd = -1;
     if (mkfifo(fifo_path, 0600) == 0) {
-        int fd = open(fifo_path, O_RDWR | O_NONBLOCK);
+        int fd = open(fifo_path, O_RDWR | O_NONBLOCK | O_NOFOLLOW);
         if (fd >= 0) {
             struct stat st;
             if (fstat(fd, &st) == 0 && S_ISFIFO(st.st_mode))
@@ -1880,6 +1881,8 @@ static void on_shutdown(GtkApplication *app, gpointer data)
     muf_data_free(&s->spore_data);
     aurora_mesh_free(&s->aurora_mesh);
     aurora_mesh_free(&s->drap_mesh);
+
+    curl_global_cleanup();
 }
 
 /* ── Main ──────────────────────────────────────────────────────── */
@@ -1903,6 +1906,9 @@ int main(int argc, char **argv)
     AppState *s = &app_state;
     memset(s, 0, sizeof(*s));
     s->fifo_fd = -1;
+
+    /* Initialize libcurl globally before any threads start */
+    curl_global_init(CURL_GLOBAL_DEFAULT);
 
     /* Load config */
     Config cfg;
@@ -1932,6 +1938,11 @@ int main(int argc, char **argv)
         center_lon = strtod(argv[2], NULL);
         target_lat = strtod(argv[3], NULL);
         target_lon = strtod(argv[4], NULL);
+        if (!isfinite(center_lat) || !isfinite(center_lon) ||
+            !isfinite(target_lat) || !isfinite(target_lon)) {
+            fprintf(stderr, "Error: coordinate arguments must be finite numbers\n");
+            return 1;
+        }
         opt_start = 5;
         cli_center_given = 1;
     } else if (npos >= 2 && has_config) {
@@ -1940,6 +1951,10 @@ int main(int argc, char **argv)
         if (cfg.name[0]) center_name = cfg.name;
         target_lat = strtod(argv[1], NULL);
         target_lon = strtod(argv[2], NULL);
+        if (!isfinite(target_lat) || !isfinite(target_lon)) {
+            fprintf(stderr, "Error: coordinate arguments must be finite numbers\n");
+            return 1;
+        }
         opt_start = 3;
     } else if (npos == 0 && has_config && cfg.target_valid) {
         center_lat = cfg.lat;
@@ -2071,6 +2086,8 @@ int main(int argc, char **argv)
         if (qrz_init(cfg.qrz_user, cfg.qrz_pass) == 0)
             s->has_qrz = 1;
     }
+    /* Zero credentials in local config struct */
+    explicit_bzero(cfg.qrz_pass, sizeof(cfg.qrz_pass));
 
     /* Load map data — merge from all -s sources, then defaults as fallback */
     int coast_loaded = 0, border_loaded = 0, land_loaded = 0;

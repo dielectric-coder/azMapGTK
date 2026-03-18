@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <limits.h>
 #include <shapefil.h>
 #include "map_data.h"
 #include "projection.h"
@@ -117,7 +118,10 @@ static int load_raw(MapData *md, const char *shp_path)
 static void project_all(MapData *md)
 {
     /* First pass: project all raw vertices */
-    float *proj = malloc(md->raw_count * 2 * sizeof(float));
+    size_t alloc = (size_t)md->raw_count * 2 * sizeof(float);
+    if (md->raw_count <= 0 || alloc / sizeof(float) / 2 != (size_t)md->raw_count)
+        return;
+    float *proj = malloc(alloc);
     if (!proj) return;
     for (int i = 0; i < md->raw_count; i++) {
         double x, y;
@@ -196,18 +200,22 @@ int map_data_load_append(MapData *md, const char *shp_path)
 
     if (load_raw(&tmp, shp_path) != 0) return -1;
 
-    /* Merge raw data */
+    /* Merge raw data — check for integer overflow */
+    if (tmp.raw_count > INT_MAX - md->raw_count) {
+        map_data_free(&tmp);
+        return -1;
+    }
     int new_total = md->raw_count + tmp.raw_count;
 
-    double *lats = realloc(md->raw_lats, new_total * sizeof(double));
+    double *lats = realloc(md->raw_lats, (size_t)new_total * sizeof(double));
     if (!lats) { map_data_free(&tmp); return -1; }
     md->raw_lats = lats;
-    double *lons = realloc(md->raw_lons, new_total * sizeof(double));
+    double *lons = realloc(md->raw_lons, (size_t)new_total * sizeof(double));
     if (!lons) { map_data_free(&tmp); return -1; }
     md->raw_lons = lons;
 
-    memcpy(md->raw_lats + md->raw_count, tmp.raw_lats, tmp.raw_count * sizeof(double));
-    memcpy(md->raw_lons + md->raw_count, tmp.raw_lons, tmp.raw_count * sizeof(double));
+    memcpy(md->raw_lats + md->raw_count, tmp.raw_lats, (size_t)tmp.raw_count * sizeof(double));
+    memcpy(md->raw_lons + md->raw_count, tmp.raw_lons, (size_t)tmp.raw_count * sizeof(double));
 
     int added = 0;
     for (int i = 0; i < tmp.raw_num_segments && md->raw_num_segments + added < MAX_SEGMENTS; i++) {
@@ -283,7 +291,12 @@ static void project_nosplit(MapData *md)
         back[i] = is_back_vertex(md->raw_lats[i], md->raw_lons[i]);
 
     /* Build clipped rings — each edge can add one intersection vertex */
-    int max_out = md->raw_count * 2;
+    size_t max_out = (size_t)md->raw_count * 2;
+    if (md->raw_count <= 0 || max_out / 2 != (size_t)md->raw_count) {
+        free(back);
+        md->vertices = NULL; md->vertex_count = 0; md->num_segments = 0;
+        return;
+    }
     double *clip_lats = malloc(max_out * sizeof(double));
     double *clip_lons = malloc(max_out * sizeof(double));
     if (!clip_lats || !clip_lons) {

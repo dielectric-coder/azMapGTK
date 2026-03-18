@@ -63,6 +63,15 @@ int config_load(Config *cfg)
     FILE *f = fopen(path, "r");
     if (!f) return -1;
 
+    /* Warn if config file is world-readable (may contain credentials) */
+    {
+        struct stat st;
+        if (fstat(fileno(f), &st) == 0 && (st.st_mode & (S_IRGRP | S_IROTH))) {
+            fprintf(stderr, "Warning: %s is accessible by other users; "
+                    "consider: chmod 600 %s\n", path, path);
+        }
+    }
+
     int has_lat = 0, has_lon = 0;
     int has_tlat = 0, has_tlon = 0;
     int has_vzoom = 0, has_vproj = 0, has_vclat = 0, has_vclon = 0;
@@ -184,7 +193,16 @@ int config_save_state(double target_lat, double target_lon, const char *target_n
     char new_vals[NUM_STATE_KEYS][256];
     snprintf(new_vals[0], sizeof(new_vals[0]), "target_lat = %.6f", target_lat);
     snprintf(new_vals[1], sizeof(new_vals[1]), "target_lon = %.6f", target_lon);
-    snprintf(new_vals[2], sizeof(new_vals[2]), "target_name = %s", target_name ? target_name : "");
+    /* Sanitize target_name: strip newlines to prevent config injection */
+    {
+        char safe_name[240] = "";
+        if (target_name) {
+            strncpy(safe_name, target_name, sizeof(safe_name) - 1);
+            for (char *p = safe_name; *p; p++)
+                if (*p == '\n' || *p == '\r') *p = ' ';
+        }
+        snprintf(new_vals[2], sizeof(new_vals[2]), "target_name = %s", safe_name);
+    }
     snprintf(new_vals[3], sizeof(new_vals[3]), "view_zoom_km = %.2f", zoom_km);
     snprintf(new_vals[4], sizeof(new_vals[4]), "view_pan_x = %.2f", pan_x);
     snprintf(new_vals[5], sizeof(new_vals[5]), "view_pan_y = %.2f", pan_y);
