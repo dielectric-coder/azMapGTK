@@ -31,6 +31,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <glob.h>
 #include <math.h>
 #include <time.h>
 #include <epoxy/gl.h>
@@ -60,6 +61,8 @@
 #define DEFAULT_LAND_REL "data/ne_110m_land/ne_110m_land.shp"
 #define DEFAULT_SHADER_REL "shaders"
 #define GC_LINE_POINTS 101
+
+typedef struct { char coast[PATH_MAX]; char border[PATH_MAX]; char land[PATH_MAX]; } ShpPaths;
 
 /* ── Application state ─────────────────────────────────────────── */
 
@@ -200,6 +203,23 @@ static void resolve_path(const char *exe, const char *rel, char *out, size_t out
         return;
     /* Fall back to azmap share (shared data) */
     snprintf(out, out_size, "%s/../share/azmap/%s", dir, rel);
+}
+
+/* Find first .shp in dir matching a glob pattern, e.g. "*coastline*.shp" */
+static int find_shp_in_dir(const char *dir, const char *pattern, char *out, size_t out_size)
+{
+    char glob_pat[PATH_MAX];
+    snprintf(glob_pat, sizeof(glob_pat), "%s/%s", dir, pattern);
+    glob_t g = {0};
+    if (glob(glob_pat, 0, NULL, &g) == 0 && g.gl_pathc > 0) {
+        strncpy(out, g.gl_pathv[0], out_size - 1);
+        out[out_size - 1] = '\0';
+        globfree(&g);
+        return 0;
+    }
+    globfree(&g);
+    fprintf(stderr, "Warning: no %s found in %s\n", pattern, dir);
+    return -1;
 }
 
 static int format_coord(char *buf, size_t sz, double lat, double lon)
@@ -1869,12 +1889,12 @@ static void print_usage(const char *prog)
     fprintf(stderr,
         "Usage: %s <center_lat> <center_lon> <target_lat> <target_lon> [options]\n"
         "       %s <target_lat> <target_lon> [options]  (center from config)\n"
-        "       %s [options]                             (restore saved session)\n"
+        "       %s [options]                             (center from config)\n"
         "\nOptions:\n"
         "  -c NAME    Center location name\n"
         "  -t NAME    Target location name\n"
         "  -d DETAIL  Station detail string (station|freq|country|site|lang|target)\n"
-        "  -s PATH    Shapefile path override\n",
+        "  -s PATH    Shapefile directory or .shp file (repeatable)\n",
         prog, prog, prog);
 }
 
@@ -1891,7 +1911,9 @@ int main(int argc, char **argv)
     double center_lat, center_lon, target_lat, target_lon;
     const char *center_name = NULL;
     const char *target_name = NULL;
-    const char *shp_override = NULL;
+    enum { MAX_SHP_DIRS = 16 };
+    const char *shp_overrides[MAX_SHP_DIRS];
+    int num_shp_overrides = 0;
     const char *detail_arg = NULL;
 
     /* Parse positional args */
@@ -1927,6 +1949,13 @@ int main(int argc, char **argv)
         target_lon = cfg.target_lon;
         if (cfg.target_name[0]) target_name = cfg.target_name;
         opt_start = 1;
+    } else if (npos == 0 && has_config) {
+        center_lat = cfg.lat;
+        center_lon = cfg.lon;
+        if (cfg.name[0]) center_name = cfg.name;
+        target_lat = center_lat;
+        target_lon = center_lon;
+        opt_start = 1;
     } else {
         print_usage(argv[0]);
         return 1;
@@ -1941,10 +1970,12 @@ int main(int argc, char **argv)
             target_name = argv[++argi];
         else if (strcmp(argv[argi], "-d") == 0 && argi + 1 < argc)
             detail_arg = argv[++argi];
-        else if (strcmp(argv[argi], "-s") == 0 && argi + 1 < argc)
-            shp_override = argv[++argi];
-        else if (argv[argi][0] != '-' && !shp_override)
-            shp_override = argv[argi];
+        else if (strcmp(argv[argi], "-s") == 0 && argi + 1 < argc) {
+            if (num_shp_overrides < MAX_SHP_DIRS)
+                shp_overrides[num_shp_overrides++] = argv[++argi];
+        }
+        else if (argv[argi][0] != '-' && num_shp_overrides < MAX_SHP_DIRS)
+            shp_overrides[num_shp_overrides++] = argv[argi];
         else {
             fprintf(stderr, "Unknown option: %s\n", argv[argi]);
             print_usage(argv[0]);
@@ -1969,7 +2000,33 @@ int main(int argc, char **argv)
     resolve_path(exe_path, DEFAULT_LAND_REL, default_land, sizeof(default_land));
     resolve_path(exe_path, DEFAULT_SHADER_REL, s->shader_dir, sizeof(s->shader_dir));
 
-    const char *shp_path = shp_override ? shp_override : default_shp;
+    /* Resolve shapefile paths from -s overrides (directories or .shp files).
+     * Each -s entry can be a directory (auto-discovers coastline/border/land)
+     * or a direct .shp path (used as coastline only).
+     * Multiple -s entries are merged together. */
+    ShpPaths *shp_paths = NULL;
+    int num_shp_paths = 0;
+
+    if (num_shp_overrides > 0) {
+        shp_paths = calloc(num_shp_overrides, sizeof(ShpPaths));
+        for (int i = 0; i < num_shp_overrides; i++) {
+            struct stat st;
+            if (stat(shp_overrides[i], &st) == 0 && S_ISDIR(st.st_mode)) {
+                find_shp_in_dir(shp_overrides[i], "*coastline*.shp",
+                                shp_paths[num_shp_paths].coast, PATH_MAX);
+                find_shp_in_dir(shp_overrides[i], "*boundary*land*.shp",
+                                shp_paths[num_shp_paths].border, PATH_MAX);
+                find_shp_in_dir(shp_overrides[i], "*_land.shp",
+                                shp_paths[num_shp_paths].land, PATH_MAX);
+                num_shp_paths++;
+            } else {
+                /* Treat as a direct .shp file (coastline) */
+                strncpy(shp_paths[num_shp_paths].coast, shp_overrides[i], PATH_MAX - 1);
+                shp_paths[num_shp_paths].coast[PATH_MAX - 1] = '\0';
+                num_shp_paths++;
+            }
+        }
+    }
 
     /* Save QTH (home) coords before view restore may override center_lat/lon */
     s->qth_lat = center_lat;
@@ -2015,13 +2072,46 @@ int main(int argc, char **argv)
             s->has_qrz = 1;
     }
 
-    /* Load map data */
-    if (map_data_load(&s->map, shp_path) != 0) {
-        fprintf(stderr, "Error: failed to load shapefile: %s\n", shp_path);
-        return 1;
+    /* Load map data — merge from all -s sources, then defaults as fallback */
+    int coast_loaded = 0, border_loaded = 0, land_loaded = 0;
+    for (int i = 0; i < num_shp_paths; i++) {
+        if (shp_paths[i].coast[0]) {
+            if (!coast_loaded) {
+                coast_loaded = (map_data_load(&s->map, shp_paths[i].coast) == 0);
+            } else {
+                map_data_load_append(&s->map, shp_paths[i].coast);
+            }
+        }
+        if (shp_paths[i].border[0]) {
+            if (!border_loaded) {
+                border_loaded = (map_data_load(&s->borders, shp_paths[i].border) == 0);
+            } else {
+                map_data_load_append(&s->borders, shp_paths[i].border);
+            }
+        }
+        if (shp_paths[i].land[0]) {
+            if (!land_loaded) {
+                land_loaded = (map_data_load(&s->land, shp_paths[i].land) == 0);
+            } else {
+                map_data_load_append(&s->land, shp_paths[i].land);
+            }
+        }
     }
-    s->has_borders = (map_data_load(&s->borders, default_border) == 0);
-    s->has_land = (map_data_load(&s->land, default_land) == 0);
+    free(shp_paths);
+
+    /* Fall back to defaults for any layer not provided by -s */
+    if (!coast_loaded) {
+        if (map_data_load(&s->map, default_shp) != 0) {
+            fprintf(stderr, "Error: failed to load shapefile: %s\n", default_shp);
+            return 1;
+        }
+    }
+    if (!border_loaded)
+        border_loaded = (map_data_load(&s->borders, default_border) == 0);
+    s->has_borders = border_loaded;
+    if (!land_loaded)
+        land_loaded = (map_data_load(&s->land, default_land) == 0);
+    s->has_land = land_loaded;
     if (s->has_land) map_data_reproject_nosplit(&s->land);
 
     /* Build grid */

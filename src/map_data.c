@@ -182,6 +182,49 @@ int map_data_load(MapData *md, const char *shp_path)
     return 0;
 }
 
+int map_data_load_append(MapData *md, const char *shp_path)
+{
+    /* Load new shapefile into a temporary MapData */
+    MapData tmp;
+    tmp.vertices = NULL;
+    tmp.vertex_count = 0;
+    tmp.num_segments = 0;
+    tmp.raw_lats = NULL;
+    tmp.raw_lons = NULL;
+    tmp.raw_count = 0;
+    tmp.raw_num_segments = 0;
+
+    if (load_raw(&tmp, shp_path) != 0) return -1;
+
+    /* Merge raw data */
+    int new_total = md->raw_count + tmp.raw_count;
+
+    double *lats = realloc(md->raw_lats, new_total * sizeof(double));
+    if (!lats) { map_data_free(&tmp); return -1; }
+    md->raw_lats = lats;
+    double *lons = realloc(md->raw_lons, new_total * sizeof(double));
+    if (!lons) { map_data_free(&tmp); return -1; }
+    md->raw_lons = lons;
+
+    memcpy(md->raw_lats + md->raw_count, tmp.raw_lats, tmp.raw_count * sizeof(double));
+    memcpy(md->raw_lons + md->raw_count, tmp.raw_lons, tmp.raw_count * sizeof(double));
+
+    int added = 0;
+    for (int i = 0; i < tmp.raw_num_segments && md->raw_num_segments + added < MAX_SEGMENTS; i++) {
+        md->raw_seg_starts[md->raw_num_segments + added] = tmp.raw_seg_starts[i] + md->raw_count;
+        md->raw_seg_counts[md->raw_num_segments + added] = tmp.raw_seg_counts[i];
+        added++;
+    }
+    md->raw_count = new_total;
+    md->raw_num_segments += added;
+
+    map_data_free(&tmp);
+
+    /* Re-project all data */
+    project_all(md);
+    return 0;
+}
+
 /* Distance-based clipping state for AZEQ mode.
  * In AZEQ there is no hemisphere boundary, so we clip at a max angular
  * distance from the center instead.  These statics are set once per

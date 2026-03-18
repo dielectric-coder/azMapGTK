@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Commit Rules
+
+Do not add Co-Authored-By lines to commit messages.
+
 ## Project Overview
 
 azMapGTK is a GTK4 port of azMap — an interactive azimuthal/orthographic map projection application for amateur radio operators. The globe is rendered via OpenGL in a GtkGLArea widget; the sidebar uses native GTK4 widgets instead of hand-drawn OpenGL UI.
@@ -36,6 +40,7 @@ There are no tests or linters configured. The project compiles with `-Wall -Wext
 ```bash
 ./azmap-gtk <center_lat> <center_lon> <target_lat> <target_lon> [options]
 ./azmap-gtk <target_lat> <target_lon> [options]   # center from ~/.config/azmap.conf
+./azmap-gtk [options]                              # center from config, no target
 ```
 
 Map data: Natural Earth 110m shapefiles in `data/` (or symlinked from `../azMap/data/`).
@@ -63,7 +68,7 @@ Land fill uses the **stencil buffer**: disc marks stencil bit 7, land polygons i
 
 Core modules (shared with original azMap, do not depend on GTK):
 - `projection.c` — forward/inverse azimuthal equidistant + orthographic projections (lat/lon ↔ km-space)
-- `map_data.c` — loads `.shp` files via shapelib, stores projected vertices in segmented arrays (`segment_starts[]`/`segment_counts[]`)
+- `map_data.c` — loads `.shp` files via shapelib, stores projected vertices in segmented arrays (`segment_starts[]`/`segment_counts[]`); supports appending multiple shapefiles via `map_data_load_append()`
 - `grid.c` — generates graticule lines + distance circles as MapData segments
 - `solar.c` — subsolar point from UTC
 - `nightmesh.c` — tessellated day/night overlay mesh with per-vertex alpha for twilight

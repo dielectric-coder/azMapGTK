@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.4 — 2026-03-17
+
+### Added
+
+- Repeatable `-s` flag: accepts directories (auto-discovers coastline/border/land shapefiles by glob pattern) or direct `.shp` files; multiple sources are merged
+- `map_data_load_append()` for merging additional shapefiles into an existing MapData
+- No-argument startup mode: centers on QTH from config when no positional args given
+
+### Fixed
+
+- Memory leak on partial `realloc` failure in shapefile append (sequential allocation with early bail-out)
+- Missing NUL termination safety on direct `.shp` path `strncpy`
+- Added stderr warnings when glob-based shapefile discovery finds no matches in a directory
+
 ## v0.1.3 — 2026-03-16
 
 ### Added

@@ -48,6 +48,9 @@ typedef struct {
 /* Load shapefile and project all vertices. Returns 0 on success. */
 int map_data_load(MapData *md, const char *shp_path);
 
+/* Append a shapefile to existing MapData (merges raw data, re-projects all). */
+int map_data_load_append(MapData *md, const char *shp_path);
+
 /* Re-project all vertices (call after changing projection center). */
 void map_data_reproject(MapData *md);
 

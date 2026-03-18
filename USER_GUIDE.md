@@ -15,11 +15,11 @@ azmap-gtk 40.4168 -3.7038 48.8566 2.3522 -c Madrid -t Paris
 # Short: target only (center read from config file)
 azmap-gtk 48.8566 2.3522 -t Paris
 
-# No arguments: restore last session from config
+# No arguments: center from config, no target
 azmap-gtk
 ```
 
-The no-argument form requires a config file with saved session state (created automatically after the first run).
+The no-argument form requires a config file with `lat` and `lon` set. The map centers on your QTH with no target.
 
 ### Command-Line Options
 
@@ -28,7 +28,7 @@ The no-argument form requires a config file with saved session state (created au
 | `-c` | NAME | Label for the center (QTH) location |
 | `-t` | NAME | Label for the target location |
 | `-d` | DETAIL | Station detail string (pipe-delimited: `station\|freq\|country\|site\|lang\|target`) |
-| `-s` | PATH | Override path to the coastline shapefile |
+| `-s` | PATH | Shapefile directory or .shp file (repeatable; auto-discovers coastline/border/land in directories) |
 
 Positional arguments are decimal degrees. Negative values represent South latitude and West longitude.
 
@@ -222,7 +222,7 @@ Or symlink from an existing azMap installation:
 ln -s /path/to/azMap/data data
 ```
 
-The `-s` flag can override the coastline shapefile path at runtime.
+The `-s` flag can override shapefile paths at runtime. It accepts either a directory (auto-discovers coastline, border, and land shapefiles by name pattern) or a direct `.shp` file path (used as coastline). The flag is repeatable — multiple `-s` entries are merged, with defaults used for any layer not provided.
 
 ## Troubleshooting
 

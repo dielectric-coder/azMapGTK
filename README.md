@@ -65,6 +65,7 @@ Or symlink from an existing azMap installation: `ln -s ../azMap/data data`
 ```bash
 ./azmap-gtk <center_lat> <center_lon> <target_lat> <target_lon> [options]
 ./azmap-gtk <target_lat> <target_lon> [options]   # center from config
+./azmap-gtk [options]                              # center from config, no target
 ```
 
 ### Example
@@ -80,7 +81,7 @@ Or symlink from an existing azMap installation: `ln -s ../azMap/data data`
 | `-c NAME` | Center location name |
 | `-t NAME` | Target location name |
 | `-d DETAIL` | Station detail string (pipe-delimited) |
-| `-s PATH` | Shapefile path override |
+| `-s PATH` | Shapefile directory or .shp file (repeatable) |
 
 ### Config File
 
