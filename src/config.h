@@ -50,6 +50,9 @@ typedef struct {
     int    window_w, window_h; /* window size in screen coords (not framebuffer) */
     int    panel_visible;      /* sidebar panel open/closed */
     int    window_valid;       /* 1 if window_w and window_h found */
+
+    /* Data directory override (shapefile search path) */
+    char   data_dir[1024];    /* from config: data_dir = /path/to/shapefiles */
 } Config;
 
 /* Load config from ~/.config/azmap.conf. Returns 0 on success, -1 if not found/error. */

@@ -138,6 +138,9 @@ int config_load(Config *cfg)
             cfg->window_h = (int)strtol(val, NULL, 10);
         } else if (strcmp(key, "panel_visible") == 0) {
             cfg->panel_visible = (int)strtol(val, NULL, 10);
+        } else if (strcmp(key, "data_dir") == 0) {
+            strncpy(cfg->data_dir, val, sizeof(cfg->data_dir) - 1);
+            cfg->data_dir[sizeof(cfg->data_dir) - 1] = '\0';
         }
     }
 

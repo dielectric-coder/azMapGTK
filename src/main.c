@@ -194,16 +194,31 @@ static void resolve_path(const char *exe, const char *rel, char *out, size_t out
     exe_copy[PATH_MAX - 1] = '\0';
     char *dir = dirname(exe_copy);
 
+    char candidate[PATH_MAX];
+
     /* Try relative to executable (build tree) */
-    snprintf(out, out_size, "%s/../%s", dir, rel);
-    if (access(out, F_OK) == 0)
+    snprintf(candidate, sizeof(candidate), "%s/../%s", dir, rel);
+    if (access(candidate, F_OK) == 0) {
+        char *canon = realpath(candidate, NULL);
+        if (canon) { snprintf(out, out_size, "%s", canon); free(canon); }
+        else       { snprintf(out, out_size, "%s", candidate); }
         return;
+    }
     /* Try installed azmap-gtk share */
-    snprintf(out, out_size, "%s/../share/azmap-gtk/%s", dir, rel);
-    if (access(out, F_OK) == 0)
+    snprintf(candidate, sizeof(candidate), "%s/../share/azmap-gtk/%s", dir, rel);
+    if (access(candidate, F_OK) == 0) {
+        char *canon = realpath(candidate, NULL);
+        if (canon) { snprintf(out, out_size, "%s", canon); free(canon); }
+        else       { snprintf(out, out_size, "%s", candidate); }
         return;
+    }
     /* Fall back to azmap share (shared data) */
-    snprintf(out, out_size, "%s/../share/azmap/%s", dir, rel);
+    snprintf(candidate, sizeof(candidate), "%s/../share/azmap/%s", dir, rel);
+    {
+        char *canon = realpath(candidate, NULL);
+        if (canon) { snprintf(out, out_size, "%s", canon); free(canon); }
+        else       { snprintf(out, out_size, "%s", candidate); }
+    }
 }
 
 /* Find first .shp in dir matching a glob pattern, e.g. "*coastline*.shp" */
@@ -2010,9 +2025,36 @@ int main(int argc, char **argv)
     }
 
     char default_shp[PATH_MAX], default_border[PATH_MAX], default_land[PATH_MAX];
-    resolve_path(exe_path, DEFAULT_SHP_REL, default_shp, sizeof(default_shp));
-    resolve_path(exe_path, DEFAULT_BORDER_REL, default_border, sizeof(default_border));
-    resolve_path(exe_path, DEFAULT_LAND_REL, default_land, sizeof(default_land));
+    int data_dir_found = 0;
+
+    /* If data_dir is set in config, try it first for shapefiles */
+    if (cfg.data_dir[0]) {
+        char try_shp[PATH_MAX] = "", try_border[PATH_MAX] = "", try_land[PATH_MAX] = "";
+        int found_coast = (find_shp_in_dir(cfg.data_dir, "*coastline*.shp",
+                           try_shp, sizeof(try_shp)) == 0);
+        find_shp_in_dir(cfg.data_dir, "*boundary*land*.shp",
+                        try_border, sizeof(try_border));
+        find_shp_in_dir(cfg.data_dir, "*_land.shp",
+                        try_land, sizeof(try_land));
+        if (found_coast) {
+            strncpy(default_shp, try_shp, PATH_MAX - 1);
+            default_shp[PATH_MAX - 1] = '\0';
+            strncpy(default_border, try_border, PATH_MAX - 1);
+            default_border[PATH_MAX - 1] = '\0';
+            strncpy(default_land, try_land, PATH_MAX - 1);
+            default_land[PATH_MAX - 1] = '\0';
+            data_dir_found = 1;
+        } else {
+            fprintf(stderr, "Warning: data_dir '%s' has no coastline shapefile, "
+                    "falling back to default paths\n", cfg.data_dir);
+        }
+    }
+
+    if (!data_dir_found) {
+        resolve_path(exe_path, DEFAULT_SHP_REL, default_shp, sizeof(default_shp));
+        resolve_path(exe_path, DEFAULT_BORDER_REL, default_border, sizeof(default_border));
+        resolve_path(exe_path, DEFAULT_LAND_REL, default_land, sizeof(default_land));
+    }
     resolve_path(exe_path, DEFAULT_SHADER_REL, s->shader_dir, sizeof(s->shader_dir));
 
     /* Resolve shapefile paths from -s overrides (directories or .shp files).
