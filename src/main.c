@@ -735,7 +735,7 @@ static void legend_add_colored_label(GtkWidget *row, const char *text,
     gtk_box_append(GTK_BOX(row), lbl);
 
     g_string_append_printf(css_buf,
-        ".%s { color: rgba(%d,%d,%d,%.2f); font-family: monospace; font-size: 11px; } ",
+        ".%s { color: rgba(%d, %d, %d, %.2f); font-family: monospace; font-size: 11px; } ",
         cls, (int)(r * 255), (int)(g * 255), (int)(b * 255), a);
 }
 
