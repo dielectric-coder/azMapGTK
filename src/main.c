@@ -32,6 +32,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <glob.h>
+#include <locale.h>
 #include <math.h>
 #include <time.h>
 #include <epoxy/gl.h>
@@ -1549,6 +1550,12 @@ static void activate(GtkApplication *app, gpointer user_data)
 {
     (void)user_data;
     AppState *s = &app_state;
+
+    /* GTK sets LC_NUMERIC to the system locale (e.g. fr_FR.UTF-8) which
+     * makes strtod/snprintf use comma as decimal separator.  All overlay
+     * data (NOAA, kc2g) and config values use dot notation, so force the
+     * C locale for numeric formatting. */
+    setlocale(LC_NUMERIC, "C");
 
     load_css();
 

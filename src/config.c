@@ -33,6 +33,34 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+/* Locale-safe strtod: accepts both '.' and ',' as decimal separator.
+ * Config files written under a non-C locale (e.g. fr_FR) use commas;
+ * files written under C locale use dots.  This handles both. */
+static double safe_strtod(const char *s, char **endp)
+{
+    /* Try standard C parse first */
+    char *end;
+    double val = strtod(s, &end);
+    /* If strtod stopped at a comma, it might be a locale decimal separator.
+     * Copy the string, replace comma with dot, and re-parse. */
+    if (*end == ',') {
+        char buf[128];
+        size_t len = strlen(s);
+        if (len < sizeof(buf)) {
+            memcpy(buf, s, len + 1);
+            buf[end - s] = '.';
+            char *end2;
+            double val2 = strtod(buf, &end2);
+            if (end2 > buf + (end - s)) {
+                if (endp) *endp = (char *)s + (end2 - buf);
+                return val2;
+            }
+        }
+    }
+    if (endp) *endp = end;
+    return val;
+}
+
 /* Trim leading and trailing whitespace in-place, return pointer into buf. */
 static char *trim(char *s)
 {
@@ -93,10 +121,10 @@ int config_load(Config *cfg)
             strncpy(cfg->name, val, sizeof(cfg->name) - 1);
             cfg->name[sizeof(cfg->name) - 1] = '\0';
         } else if (strcmp(key, "lat") == 0) {
-            cfg->lat = strtod(val, NULL);
+            cfg->lat = safe_strtod(val, NULL);
             has_lat = 1;
         } else if (strcmp(key, "lon") == 0) {
-            cfg->lon = strtod(val, NULL);
+            cfg->lon = safe_strtod(val, NULL);
             has_lon = 1;
         } else if (strcmp(key, "qrz_user") == 0) {
             strncpy(cfg->qrz_user, val, sizeof(cfg->qrz_user) - 1);
@@ -105,21 +133,21 @@ int config_load(Config *cfg)
             strncpy(cfg->qrz_pass, val, sizeof(cfg->qrz_pass) - 1);
             cfg->qrz_pass[sizeof(cfg->qrz_pass) - 1] = '\0';
         } else if (strcmp(key, "target_lat") == 0) {
-            cfg->target_lat = strtod(val, NULL);
+            cfg->target_lat = safe_strtod(val, NULL);
             has_tlat = 1;
         } else if (strcmp(key, "target_lon") == 0) {
-            cfg->target_lon = strtod(val, NULL);
+            cfg->target_lon = safe_strtod(val, NULL);
             has_tlon = 1;
         } else if (strcmp(key, "target_name") == 0) {
             strncpy(cfg->target_name, val, sizeof(cfg->target_name) - 1);
             cfg->target_name[sizeof(cfg->target_name) - 1] = '\0';
         } else if (strcmp(key, "view_zoom_km") == 0) {
-            cfg->view_zoom_km = (float)strtod(val, NULL);
+            cfg->view_zoom_km = (float)safe_strtod(val, NULL);
             has_vzoom = 1;
         } else if (strcmp(key, "view_pan_x") == 0) {
-            cfg->view_pan_x = (float)strtod(val, NULL);
+            cfg->view_pan_x = (float)safe_strtod(val, NULL);
         } else if (strcmp(key, "view_pan_y") == 0) {
-            cfg->view_pan_y = (float)strtod(val, NULL);
+            cfg->view_pan_y = (float)safe_strtod(val, NULL);
         } else if (strcmp(key, "view_proj_mode") == 0) {
             if (strcmp(val, "ortho") == 0)
                 cfg->view_proj_mode = 1;
@@ -127,10 +155,10 @@ int config_load(Config *cfg)
                 cfg->view_proj_mode = 0;
             has_vproj = 1;
         } else if (strcmp(key, "view_center_lat") == 0) {
-            cfg->view_center_lat = strtod(val, NULL);
+            cfg->view_center_lat = safe_strtod(val, NULL);
             has_vclat = 1;
         } else if (strcmp(key, "view_center_lon") == 0) {
-            cfg->view_center_lon = strtod(val, NULL);
+            cfg->view_center_lon = safe_strtod(val, NULL);
             has_vclon = 1;
         } else if (strcmp(key, "window_w") == 0) {
             cfg->window_w = (int)strtol(val, NULL, 10);
