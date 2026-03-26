@@ -28,6 +28,7 @@
 #include <math.h>
 #include "renderer.h"
 #include "projection.h"
+#include "beacon.h"
 
 /* Fallback shaders in case file loading fails */
 static const char *default_vertex_shader =
@@ -792,6 +793,9 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         }
     }
 
+    /* Draw NCDXF beacons */
+    renderer_draw_beacons(r, mvp);
+
     glBindVertexArray(0);
 }
 
@@ -817,4 +821,114 @@ void renderer_destroy(Renderer *r)
     if (r->spore_vao) { glDeleteVertexArrays(1, &r->spore_vao); glDeleteBuffers(1, &r->spore_vbo); }
     if (r->label_vao) { glDeleteVertexArrays(1, &r->label_vao); glDeleteBuffers(1, &r->label_vbo); }
     if (r->label_bg_vao) { glDeleteVertexArrays(1, &r->label_bg_vao); glDeleteBuffers(1, &r->label_bg_vbo); }
+    if (r->beacon_vao) { glDeleteVertexArrays(1, &r->beacon_vao); glDeleteBuffers(1, &r->beacon_vbo); }
+}
+
+/* Beacon rendering — each beacon is a small diamond (4 triangles) in km-space.
+ * This avoids GL_POINTS which may be clamped to 1px in core profile. */
+
+#define BEACON_MARKER_KM 80.0f  /* half-size of diamond marker in km */
+
+void renderer_upload_beacons(Renderer *r, const BeaconSystem *sys)
+{
+    if (!sys->enabled || !sys->count) {
+        r->beacon_count = 0;
+        return;
+    }
+
+    if (r->beacon_vao == 0) {
+        glGenVertexArrays(1, &r->beacon_vao);
+        glGenBuffers(1, &r->beacon_vbo);
+        glBindVertexArray(r->beacon_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, r->beacon_vbo);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray(0);
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+
+    /* Each beacon = 4 triangles (diamond) = 12 vertices.
+     * Layout: silent beacons first, then band 0..4 groups. */
+    float *verts = malloc(sys->count * 12 * 2 * sizeof(float));
+    if (!verts) return;
+
+    int idx = 0;
+    float s = BEACON_MARKER_KM;
+
+    /* Helper macro: emit one diamond at (cx,cy) */
+    #define EMIT_DIAMOND(cx, cy) do { \
+        float _pts[4][2] = {{cx, (cy)+s}, {(cx)+s, cy}, {cx, (cy)-s}, {(cx)-s, cy}}; \
+        for (int _t = 0; _t < 4; _t++) { \
+            int _n = (_t + 1) % 4; \
+            verts[idx++] = cx;           verts[idx++] = cy; \
+            verts[idx++] = _pts[_t][0];  verts[idx++] = _pts[_t][1]; \
+            verts[idx++] = _pts[_n][0];  verts[idx++] = _pts[_n][1]; \
+        } \
+    } while(0)
+
+    /* Silent beacons */
+    for (int i = 0; i < sys->count; i++) {
+        if (sys->beacons[i].active) continue;
+        double px, py;
+        if (projection_forward(sys->beacons[i].lat, sys->beacons[i].lon, &px, &py) != 0)
+            continue;
+        float cx = (float)px, cy = (float)py;
+        EMIT_DIAMOND(cx, cy);
+    }
+    r->beacon_inactive_count = idx / 2;
+
+    /* Active beacons grouped by band */
+    for (int b = 0; b < NCDXF_BAND_COUNT; b++) {
+        r->beacon_band_start[b] = idx / 2;
+        for (int i = 0; i < sys->count; i++) {
+            if (!sys->beacons[i].active || sys->beacons[i].band_index != b)
+                continue;
+            double px, py;
+            if (projection_forward(sys->beacons[i].lat, sys->beacons[i].lon, &px, &py) != 0)
+                continue;
+            float cx = (float)px, cy = (float)py;
+            EMIT_DIAMOND(cx, cy);
+        }
+        r->beacon_band_count[b] = idx / 2 - r->beacon_band_start[b];
+    }
+    #undef EMIT_DIAMOND
+
+    int total_verts = idx / 2;
+    glBindVertexArray(r->beacon_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->beacon_vbo);
+    glBufferData(GL_ARRAY_BUFFER, total_verts * 2 * sizeof(float), verts, GL_DYNAMIC_DRAW);
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    r->beacon_count = total_verts;
+    r->beacon_dirty = 0;
+    free(verts);
+}
+
+void renderer_draw_beacons(const Renderer *r, const float *mvp)
+{
+    if (r->beacon_count == 0 || r->beacon_vao == 0)
+        return;
+
+    glUseProgram(r->program);
+    glUniformMatrix4fv(r->mvp_loc, 1, GL_FALSE, mvp);
+    glUniform1f(r->stipple_loc, 0.0f);
+
+    glBindVertexArray(r->beacon_vao);
+
+    /* Silent beacons: grey */
+    if (r->beacon_inactive_count > 0) {
+        glUniform4f(r->color_loc, 0.55f, 0.55f, 0.55f, 0.7f);
+        glDrawArrays(GL_TRIANGLES, 0, r->beacon_inactive_count);
+    }
+
+    /* Active beacons: one color per band */
+    for (int b = 0; b < NCDXF_BAND_COUNT; b++) {
+        if (r->beacon_band_count[b] == 0) continue;
+        const float *c = ncdxf_band_colors[b];
+        glUniform4f(r->color_loc, c[0], c[1], c[2], c[3]);
+        glDrawArrays(GL_TRIANGLES, r->beacon_band_start[b], r->beacon_band_count[b]);
+    }
+
+    glBindVertexArray(0);
 }

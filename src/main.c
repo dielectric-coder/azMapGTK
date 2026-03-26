@@ -51,6 +51,7 @@
 #include "qrz.h"
 #include "overlay.h"
 #include "fetch.h"
+#include "beacon.h"
 #include <curl/curl.h>
 
 #define SIDEBAR_WIDTH  260
@@ -148,6 +149,13 @@ typedef struct {
 
     /* Last successful fetch time (for sources without embedded timestamps) */
     time_t        ts_muf;
+
+    /* NCDXF Beacon System */
+    BeaconSystem  beacon_system;
+    int           beacons_enabled;
+    GtkWidget     *btn_beacons;
+    GtkWidget     *lbl_beacon_info;
+    guint          beacon_timer_id;
 
     /* Coordinates */
     double qth_lat, qth_lon;     /* original QTH from config/CLI — never changes */
@@ -367,6 +375,7 @@ static void reproject_all(AppState *s)
         map_data_reproject_nosplit(&s->land);
         renderer_upload_land(&s->renderer, &s->land);
     }
+    s->renderer.beacon_dirty = 1;
 }
 
 static void update_target_geometry(AppState *s, int recompute_dist)
@@ -614,6 +623,10 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
     /* North pole */
     renderer_upload_npole(&s->renderer, (float)s->npx, (float)s->npy, marker_size);
 
+    /* NCDXF Beacons — only re-upload when dirty (timer sets the flag) */
+    if (s->beacons_enabled && s->renderer.beacon_dirty)
+        renderer_upload_beacons(&s->renderer, &s->beacon_system);
+
     /* Build labels in pixel-space */
     float mvp[16];
     camera_get_mvp(&s->cam, mvp);
@@ -717,6 +730,35 @@ static gboolean on_night_update(gpointer data)
     renderer_upload_night(&s->renderer, s->nightmesh.vertices,
                           s->nightmesh.vertex_count);
     gtk_widget_queue_draw(s->gl_area);
+    return G_SOURCE_CONTINUE;
+}
+
+static gboolean on_beacon_timer(gpointer data)
+{
+    AppState *s = (AppState *)data;
+    if (!s->gl_initialized || !s->beacons_enabled) return G_SOURCE_CONTINUE;
+
+    time_t now = time(NULL);
+    int prev_slot = (int)(((now - 1) / BEACON_SLOT_SECONDS) % NCDXF_BEACON_COUNT);
+    beacon_update_states(&s->beacon_system, now);
+    int cur_slot = beacon_get_slot_index();
+
+    s->renderer.beacon_dirty = 1;
+
+    /* Update beacon info label: show the 20m (primary) beacon + countdown */
+    const Beacon *primary = beacon_get_on_band(&s->beacon_system, 0);
+    if (primary) {
+        int secs_left = beacon_get_seconds_until_next(&s->beacon_system);
+        char info[128];
+        snprintf(info, sizeof(info), "BCN %s  %ds", primary->callsign, secs_left);
+        gtk_label_set_text(GTK_LABEL(s->lbl_beacon_info), info);
+    } else {
+        gtk_label_set_text(GTK_LABEL(s->lbl_beacon_info), "BCN --");
+    }
+
+    /* Only redraw map when the slot changed */
+    if (prev_slot != cur_slot)
+        gtk_widget_queue_draw(s->gl_area);
     return G_SOURCE_CONTINUE;
 }
 
@@ -1281,6 +1323,23 @@ static void on_home_clicked(GtkButton *btn, gpointer data)
     gtk_widget_queue_draw(s->gl_area);
 }
 
+static void on_beacon_toggle(GtkToggleButton *btn, gpointer data)
+{
+    AppState *s = (AppState *)data;
+    s->beacons_enabled = gtk_toggle_button_get_active(btn);
+
+    if (s->beacons_enabled) {
+        beacon_update_states(&s->beacon_system, time(NULL));
+        s->renderer.beacon_dirty = 1;
+        gtk_label_set_text(GTK_LABEL(s->lbl_beacon_info), "BCN on");
+    } else {
+        s->renderer.beacon_count = 0;
+        gtk_label_set_text(GTK_LABEL(s->lbl_beacon_info), "BCN off");
+    }
+
+    gtk_widget_queue_draw(s->gl_area);
+}
+
 static void toggle_overlay(GtkToggleButton *btn, AppState *s,
                             int *active, int *fetching, FetchRequest *fetch,
                             time_t *last_fetch, const char *url)
@@ -1770,15 +1829,57 @@ static void activate(GtkApplication *app, gpointer user_data)
     s->btn_spore = gtk_toggle_button_new_with_label("E's");
     s->btn_muf = gtk_toggle_button_new_with_label("MUF");
     s->btn_drap = gtk_toggle_button_new_with_label("DRAP");
+    s->btn_beacons = gtk_toggle_button_new_with_label("Beacons");
     gtk_box_append(GTK_BOX(layers_box), s->btn_aurora);
     gtk_box_append(GTK_BOX(layers_box), s->btn_spore);
     gtk_box_append(GTK_BOX(layers_box), s->btn_muf);
     gtk_box_append(GTK_BOX(layers_box), s->btn_drap);
+    gtk_box_append(GTK_BOX(layers_box), s->btn_beacons);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(s->btn_beacons), TRUE);
+
+    s->lbl_beacon_info = gtk_label_new("BCN --");
+    gtk_widget_add_css_class(s->lbl_beacon_info, "info-label");
+    gtk_box_append(GTK_BOX(layers_box), s->lbl_beacon_info);
+
+    /* Beacon band legend — fixed color row */
+    {
+        GtkWidget *bcn_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+        gtk_widget_set_halign(bcn_row, GTK_ALIGN_CENTER);
+        gtk_box_append(GTK_BOX(layers_box), bcn_row);
+
+        GString *css = g_string_new("");
+        for (int b = 0; b < NCDXF_BAND_COUNT; b++) {
+            char cls[16], lbl[16];
+            snprintf(cls, sizeof(cls), "bcn%d", b);
+            snprintf(lbl, sizeof(lbl), "%s", ncdxf_band_labels[b]);
+            GtkWidget *w = gtk_label_new(lbl);
+            gtk_widget_add_css_class(w, cls);
+            gtk_box_append(GTK_BOX(bcn_row), w);
+            g_string_append_printf(css,
+                ".%s { color: rgba(%d,%d,%d,%.2f);"
+                " font-family: monospace; font-size: 11px; } ",
+                cls,
+                (int)(ncdxf_band_colors[b][0] * 255),
+                (int)(ncdxf_band_colors[b][1] * 255),
+                (int)(ncdxf_band_colors[b][2] * 255),
+                ncdxf_band_colors[b][3]);
+        }
+
+        GtkCssProvider *bcn_css = gtk_css_provider_new();
+        gtk_css_provider_load_from_string(bcn_css, css->str);
+        gtk_style_context_add_provider_for_display(
+            gdk_display_get_default(),
+            GTK_STYLE_PROVIDER(bcn_css),
+            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+        g_object_unref(bcn_css);
+        g_string_free(css, TRUE);
+    }
 
     g_signal_connect(s->btn_aurora, "toggled", G_CALLBACK(on_aurora_toggle), s);
     g_signal_connect(s->btn_spore, "toggled", G_CALLBACK(on_spore_toggle), s);
     g_signal_connect(s->btn_muf, "toggled", G_CALLBACK(on_muf_toggle), s);
     g_signal_connect(s->btn_drap, "toggled", G_CALLBACK(on_drap_toggle), s);
+    g_signal_connect(s->btn_beacons, "toggled", G_CALLBACK(on_beacon_toggle), s);
 
     GtkWidget *btn_sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_add_css_class(btn_sep, "btn-sep");
@@ -1818,10 +1919,16 @@ static void activate(GtkApplication *app, gpointer user_data)
     s->input.swap_cb = on_swap_source_target;
     s->input.swap_cb_data = s;
 
+    /* Initialize beacon system (needs projection center set in main()) */
+    beacon_system_init(&s->beacon_system);
+    s->beacons_enabled = 1;
+    s->renderer.beacon_dirty = 1;
+
     /* Timers */
     s->clock_timer_id = g_timeout_add_seconds(1, on_clock_tick, s);
     s->night_timer_id = g_timeout_add_seconds(NIGHT_UPDATE_SEC, on_night_update, s);
     s->fetch_timer_id = g_timeout_add(500, on_fetch_poll, s);
+    s->beacon_timer_id = g_timeout_add_seconds(1, on_beacon_timer, s);
 
     /* FIFO IPC — use XDG_RUNTIME_DIR to avoid symlink races in /tmp */
     const char *runtime = g_get_user_runtime_dir();
@@ -1861,6 +1968,7 @@ static void on_shutdown(GtkApplication *app, gpointer data)
     if (s->clock_timer_id) g_source_remove(s->clock_timer_id);
     if (s->night_timer_id) g_source_remove(s->night_timer_id);
     if (s->fetch_timer_id) g_source_remove(s->fetch_timer_id);
+    if (s->beacon_timer_id) g_source_remove(s->beacon_timer_id);
     if (s->fifo_source_id) g_source_remove(s->fifo_source_id);
 
     /* Save session state */

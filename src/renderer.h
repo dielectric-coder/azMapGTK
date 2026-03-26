@@ -27,6 +27,7 @@
 
 #include "map_data.h"
 #include "overlay.h"
+#include "beacon.h"
 
 typedef struct {
     unsigned int program;
@@ -146,6 +147,15 @@ typedef struct {
     unsigned int label_bg_vbo;
     int          label_bg_split;
     int          label_bg_vertex_count;
+
+    /* NCDXF Beacons */
+    unsigned int beacon_vao;
+    unsigned int beacon_vbo;
+    int          beacon_count;                        /* total vertices */
+    int          beacon_inactive_count;               /* silent beacon vertices */
+    int          beacon_band_start[NCDXF_BAND_COUNT]; /* per-band vertex offset */
+    int          beacon_band_count[NCDXF_BAND_COUNT]; /* per-band vertex count */
+    int          beacon_dirty;
 } Renderer;
 
 int renderer_init(Renderer *r, const char *shader_dir);
@@ -167,6 +177,10 @@ void renderer_upload_muf(Renderer *r, const MufData *m);
 void renderer_upload_spore(Renderer *r, const MufData *m);
 void renderer_upload_labels(Renderer *r, float *verts, int vertex_count, int split);
 void renderer_upload_label_bgs(Renderer *r, float *verts, int vertex_count, int split);
+
+/* Beacon rendering */
+void renderer_upload_beacons(Renderer *r, const BeaconSystem *sys);
+void renderer_draw_beacons(const Renderer *r, const float *mvp);
 
 /* Draw the map in the GtkGLArea viewport. */
 void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h);

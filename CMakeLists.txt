@@ -46,6 +46,7 @@ add_executable(azmap-gtk
     src/cJSON.c
     src/overlay.c
     src/fetch.c
+    src/beacon.c
 )
 
 target_include_directories(azmap-gtk PRIVATE
