@@ -49,7 +49,7 @@ const float ncdxf_band_colors[NCDXF_BAND_COUNT][4] = {
 /* Official NCDXF/IARU beacon database — 18 beacons in transmission order. */
 static const Beacon ncdxf_beacon_database[NCDXF_BEACON_COUNT] = {
     /*  0 */ {"4U1UN",   "FN30as",  40.750,   -73.967,  0, -1, "New York"},
-    /*  1 */ {"VE8AT",   "DO33we",  62.450,  -114.383,  0, -1, "Yellowknife"},
+    /*  1 */ {"VE8AT",   "CP38gh",  68.313,  -133.458,  0, -1, "Inuvik"},
     /*  2 */ {"W6WX",    "CM87xq",  37.339,  -122.037,  0, -1, "California"},
     /*  3 */ {"KH6RS",   "BL10lh",  21.307,  -157.858,  0, -1, "Hawaii"},
     /*  4 */ {"ZL6B",    "RE78ir", -41.283,   174.767,  0, -1, "New Zealand"},
