@@ -28,6 +28,14 @@
 #include <curl/curl.h>
 #include "fetch.h"
 
+/* Memory barrier for thread safety */
+#ifdef __GNUC__
+#define memory_barrier() __sync_synchronize()
+#else
+#define memory_barrier() pthread_mutex_lock(&dummy_mutex); pthread_mutex_unlock(&dummy_mutex)
+static pthread_mutex_t dummy_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
 /* Growable buffer for accumulating curl response data. */
 typedef struct {
     char   *data;
@@ -105,11 +113,13 @@ static void *fetch_thread(void *arg)
     if (res == CURLE_OK) {
         req->response = buf.data;
         req->response_len = buf.len;
+        memory_barrier(); /* Ensure response data is visible before status update */
         req->status = 1;
     } else {
         free(buf.data);
         req->status = -1;
     }
+    memory_barrier(); /* Ensure status update is visible to main thread */
     pthread_mutex_unlock(&req->mutex);
     return NULL;
 }
@@ -157,19 +167,23 @@ void fetch_start(FetchRequest *req, const char *url)
 /* Poll status: 0=pending, 1=done, -1=error.  Lock-protected. */
 int fetch_check(FetchRequest *req)
 {
+    memory_barrier(); /* Ensure visibility of status updates from fetch thread */
     pthread_mutex_lock(&req->mutex);
     int s = req->status;
     pthread_mutex_unlock(&req->mutex);
+    memory_barrier(); /* Ensure status read is visible to caller */
     return s;
 }
 
 /* Transfer ownership of the response string to the caller (who must free it). */
 char *fetch_take_response(FetchRequest *req)
 {
+    memory_barrier(); /* Ensure visibility of response from fetch thread */
     pthread_mutex_lock(&req->mutex);
     char *r = req->response;
     req->response = NULL;
     pthread_mutex_unlock(&req->mutex);
+    memory_barrier(); /* Ensure response transfer is visible to caller */
     return r;
 }
 

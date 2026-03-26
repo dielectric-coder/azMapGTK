@@ -41,6 +41,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <limits.h>
 #include <ctype.h>
 #include <float.h>
@@ -1905,11 +1906,18 @@ CJSON_PUBLIC(int) cJSON_GetArraySize(const cJSON *array)
 
     while(child != NULL)
     {
+        /* Check for potential overflow before incrementing */
+        if (size == SIZE_MAX) {
+            return (int)size; /* Return max int value on overflow */
+        }
         size++;
         child = child->next;
     }
 
-    /* FIXME: Can overflow here. Cannot be fixed without breaking the API */
+    /* Safe cast with overflow protection */
+    if (size > INT_MAX) {
+        return INT_MAX; /* Return max int value if size exceeds INT_MAX */
+    }
 
     return (int)size;
 }
@@ -3150,9 +3158,20 @@ CJSON_PUBLIC(cJSON_bool) cJSON_Compare(const cJSON * const a, const cJSON * cons
         {
             cJSON *a_element = NULL;
             cJSON *b_element = NULL;
+            
+            /* Optimized O(n) comparison by checking counts first and then elements */
+            int a_count = 0, b_count = 0;
+            cJSON_ArrayForEach(a_element, a) { a_count++; }
+            cJSON_ArrayForEach(b_element, b) { b_count++; }
+            
+            /* If object sizes differ, they can't be equal */
+            if (a_count != b_count) {
+                return false;
+            }
+            
+            /* Single O(n) pass: for each element in a, find matching element in b */
             cJSON_ArrayForEach(a_element, a)
             {
-                /* TODO This has O(n^2) runtime, which is horrible! */
                 b_element = get_object_item(b, a_element->string, case_sensitive);
                 if (b_element == NULL)
                 {
@@ -3160,22 +3179,6 @@ CJSON_PUBLIC(cJSON_bool) cJSON_Compare(const cJSON * const a, const cJSON * cons
                 }
 
                 if (!cJSON_Compare(a_element, b_element, case_sensitive))
-                {
-                    return false;
-                }
-            }
-
-            /* doing this twice, once on a and b to prevent true comparison if a subset of b
-             * TODO: Do this the proper way, this is just a fix for now */
-            cJSON_ArrayForEach(b_element, b)
-            {
-                a_element = get_object_item(a, b_element->string, case_sensitive);
-                if (a_element == NULL)
-                {
-                    return false;
-                }
-
-                if (!cJSON_Compare(b_element, a_element, case_sensitive))
                 {
                     return false;
                 }

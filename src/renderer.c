@@ -29,6 +29,23 @@
 #include "renderer.h"
 #include "projection.h"
 
+/* Fallback shaders in case file loading fails */
+static const char *default_vertex_shader =
+    "#version 330 core\n"
+    "uniform mat4 u_mvp;\n"
+    "in vec2 a_pos;\n"
+    "void main() {\n"
+    "    gl_Position = u_mvp * vec4(a_pos, 0.0, 1.0);\n"
+    "}\n";
+
+static const char *default_fragment_shader =
+    "#version 330 core\n"
+    "uniform vec4 u_color;\n"
+    "out vec4 frag_color;\n"
+    "void main() {\n"
+    "    frag_color = u_color;\n"
+    "}\n";
+
 static char *read_file(const char *path)
 {
     FILE *f = fopen(path, "rb");
@@ -48,7 +65,7 @@ static char *read_file(const char *path)
     return buf;
 }
 
-static unsigned int compile_shader(const char *src, GLenum type)
+static unsigned int compile_shader(const char *src, GLenum type, const char *shader_name)
 {
     unsigned int s = glCreateShader(type);
     glShaderSource(s, 1, (const char **)&src, NULL);
@@ -58,7 +75,11 @@ static unsigned int compile_shader(const char *src, GLenum type)
     if (!ok) {
         char log[512];
         glGetShaderInfoLog(s, sizeof(log), NULL, log);
-        fprintf(stderr, "Shader compile error: %s\n", log);
+        fprintf(stderr, "Error compiling %s shader:\n%s\n", shader_name, log);
+        
+        /* Print shader source for debugging */
+        fprintf(stderr, "Shader source:\n%s\n", src);
+        
         glDeleteShader(s);
         return 0;
     }
@@ -75,14 +96,25 @@ int renderer_init(Renderer *r, const char *shader_dir)
 
     char *vert_src = read_file(vert_path);
     char *frag_src = read_file(frag_path);
+    
+    /* Fallback to built-in shaders if file loading fails */
+    if (!vert_src) {
+        fprintf(stderr, "Warning: Using fallback vertex shader\n");
+        vert_src = strdup(default_vertex_shader);
+    }
+    if (!frag_src) {
+        fprintf(stderr, "Warning: Using fallback fragment shader\n");
+        frag_src = strdup(default_fragment_shader);
+    }
+    
     if (!vert_src || !frag_src) {
         free(vert_src);
         free(frag_src);
         return -1;
     }
 
-    unsigned int vs = compile_shader(vert_src, GL_VERTEX_SHADER);
-    unsigned int fs = compile_shader(frag_src, GL_FRAGMENT_SHADER);
+    unsigned int vs = compile_shader(vert_src, GL_VERTEX_SHADER, "vertex");
+    unsigned int fs = compile_shader(frag_src, GL_FRAGMENT_SHADER, "fragment");
     free(vert_src);
     free(frag_src);
 
@@ -105,7 +137,14 @@ int renderer_init(Renderer *r, const char *shader_dir)
     if (!ok) {
         char log[512];
         glGetProgramInfoLog(r->program, sizeof(log), NULL, log);
-        fprintf(stderr, "Program link error: %s\n", log);
+        fprintf(stderr, "Error linking shader program:\n%s\n", log);
+        
+        /* Try to get more detailed info about which shader failed */
+        GLsizei count;
+        GLuint shaders[2];
+        glGetAttachedShaders(r->program, 2, &count, shaders);
+        fprintf(stderr, "Number of attached shaders: %d\n", count);
+        
         glDeleteProgram(r->program);
         r->program = 0;
         return -1;

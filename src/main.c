@@ -1919,7 +1919,8 @@ static void print_usage(const char *prog)
         "  -c NAME    Center location name\n"
         "  -t NAME    Target location name\n"
         "  -d DETAIL  Station detail string (station|freq|country|site|lang|target)\n"
-        "  -s PATH    Shapefile directory or .shp file (repeatable)\n",
+        "  -s PATH    Shapefile directory or .shp file (repeatable)\n"
+        "  -h, --help Show this help message\n",
         prog, prog, prog);
 }
 
@@ -2001,7 +2002,11 @@ int main(int argc, char **argv)
     /* Parse flags */
     int argi = opt_start;
     while (argi < argc) {
-        if (strcmp(argv[argi], "-c") == 0 && argi + 1 < argc)
+        if (strcmp(argv[argi], "--help") == 0 || strcmp(argv[argi], "-h") == 0) {
+            print_usage(argv[0]);
+            return 0;
+        }
+        else if (strcmp(argv[argi], "-c") == 0 && argi + 1 < argc)
             center_name = argv[++argi];
         else if (strcmp(argv[argi], "-t") == 0 && argi + 1 < argc)
             target_name = argv[++argi];
