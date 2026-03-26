@@ -867,8 +867,8 @@ void renderer_destroy(Renderer *r)
 /* Beacon rendering — each beacon is a filled circle (triangle fan) in km-space.
  * This avoids GL_POINTS which may be clamped to 1px in core profile. */
 
-#define BEACON_RADIUS_KM 100.0f  /* radius of circle marker in km */
-#define BEACON_CIRCLE_SEGS 16    /* segments for circle approximation */
+#define BEACON_RADIUS_INACTIVE 40.0f  /* fixed radius for silent beacons (km) */
+#define BEACON_CIRCLE_SEGS 16        /* segments for circle approximation */
 
 void renderer_upload_beacons(Renderer *r, const BeaconSystem *sys)
 {
@@ -903,7 +903,9 @@ void renderer_upload_beacons(Renderer *r, const BeaconSystem *sys)
     if (!verts) return;
 
     int idx = 0;
-    float rad = BEACON_RADIUS_KM;
+    float rad_inactive = BEACON_RADIUS_INACTIVE;
+    float rad_active = r->beacon_anim_radius > 0.0f ? r->beacon_anim_radius : 100.0f;
+    float rad = rad_inactive;
 
     /* Helper macro: emit one filled circle at (cx,cy) */
     #define EMIT_CIRCLE(cx, cy) do { \
@@ -926,7 +928,8 @@ void renderer_upload_beacons(Renderer *r, const BeaconSystem *sys)
     }
     r->beacon_inactive_count = idx / 2;
 
-    /* Active beacons grouped by band */
+    /* Active beacons grouped by band — use animated radius */
+    rad = rad_active;
     for (int b = 0; b < NCDXF_BAND_COUNT; b++) {
         r->beacon_band_start[b] = idx / 2;
         for (int i = 0; i < sys->count; i++) {

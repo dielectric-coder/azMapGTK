@@ -157,6 +157,7 @@ typedef struct {
     GtkWidget     *btn_beacons;
     GtkWidget     *lbl_beacon_info;
     guint          beacon_timer_id;
+    guint          beacon_anim_timer_id;
 
     /* Coordinates */
     double qth_lat, qth_lon;     /* original QTH from config/CLI — never changes */
@@ -760,6 +761,24 @@ static gboolean on_beacon_timer(gpointer data)
     /* Only redraw map when the slot changed */
     if (prev_slot != cur_slot)
         gtk_widget_queue_draw(s->gl_area);
+    return G_SOURCE_CONTINUE;
+}
+
+static gboolean on_beacon_anim_timer(gpointer data)
+{
+    AppState *s = (AppState *)data;
+    if (!s->gl_initialized || !s->beacons_enabled) return G_SOURCE_CONTINUE;
+
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double t = (ts.tv_sec % 2) + ts.tv_nsec / 1e9;  /* 2-second cycle */
+    float radius = 40.0f + 60.0f * (0.5f + 0.5f * sinf((float)(t * M_PI)));
+
+    if (fabsf(radius - s->renderer.beacon_anim_radius) > 0.5f) {
+        s->renderer.beacon_anim_radius = radius;
+        s->renderer.beacon_dirty = 1;
+        gtk_widget_queue_draw(s->gl_area);
+    }
     return G_SOURCE_CONTINUE;
 }
 
@@ -1948,6 +1967,7 @@ static void activate(GtkApplication *app, gpointer user_data)
     /* Initialize beacon system (needs projection center set in main()) */
     beacon_system_init(&s->beacon_system);
     s->beacons_enabled = 1;
+    s->renderer.beacon_anim_radius = 100.0f;
     s->renderer.beacon_dirty = 1;
 
     /* Timers */
@@ -1955,6 +1975,7 @@ static void activate(GtkApplication *app, gpointer user_data)
     s->night_timer_id = g_timeout_add_seconds(NIGHT_UPDATE_SEC, on_night_update, s);
     s->fetch_timer_id = g_timeout_add(500, on_fetch_poll, s);
     s->beacon_timer_id = g_timeout_add_seconds(1, on_beacon_timer, s);
+    s->beacon_anim_timer_id = g_timeout_add(50, on_beacon_anim_timer, s);
 
     /* FIFO IPC — use XDG_RUNTIME_DIR to avoid symlink races in /tmp */
     const char *runtime = g_get_user_runtime_dir();
@@ -1995,6 +2016,7 @@ static void on_shutdown(GtkApplication *app, gpointer data)
     if (s->night_timer_id) g_source_remove(s->night_timer_id);
     if (s->fetch_timer_id) g_source_remove(s->fetch_timer_id);
     if (s->beacon_timer_id) g_source_remove(s->beacon_timer_id);
+    if (s->beacon_anim_timer_id) g_source_remove(s->beacon_anim_timer_id);
     if (s->fifo_source_id) g_source_remove(s->fifo_source_id);
 
     /* Save session state */

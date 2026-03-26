@@ -156,6 +156,7 @@ typedef struct {
     int          beacon_band_start[NCDXF_BAND_COUNT]; /* per-band vertex offset */
     int          beacon_band_count[NCDXF_BAND_COUNT]; /* per-band vertex count */
     int          beacon_dirty;
+    float        beacon_anim_radius;   /* current animated radius for active beacons (km) */
 } Renderer;
 
 int renderer_init(Renderer *r, const char *shader_dir);
