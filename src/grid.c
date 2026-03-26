@@ -94,8 +94,11 @@ void grid_build_geo(MapData *md)
     md->vertex_count = 0;
     md->num_segments = 0;
 
-    /* Parallels: -60 to 60 every 30 deg, meridians: every 30 deg */
-    int num_parallels = (int)(120.0 / GEO_LAT_STEP) + 1; /* -60 to 60 */
+    /* Parallels and meridians — always use ±60° range so parallels land on
+     * nice latitudes (0, ±30, ±60).  Mercator visibility extends to ±85°
+     * but the ±60° parallels are sufficient. */
+    double lat_max = 60.0;
+    int num_parallels = (int)(2.0 * lat_max / GEO_LAT_STEP) + 1;
     int pts_per_parallel = (int)(360.0 / GEO_SAMPLE_STEP) + 1; /* 73 */
     int num_meridians = (int)(360.0 / GEO_LON_STEP);      /* 12 */
     int pts_per_meridian = (int)(180.0 / GEO_SAMPLE_STEP) + 1; /* 37 */
@@ -199,10 +202,16 @@ void grid_build_dist_circles(MapData *md, double center_lat, double center_lon)
     double clat = center_lat * M_PI / 180.0;
     double clon = center_lon * M_PI / 180.0;
 
+    /* Mercator: projection_forward() always returns 0, so we detect
+     * antimeridian wrapping by checking for large x-jumps instead. */
+    int is_merc = (projection_get_mode() == PROJ_MERCATOR);
+    float merc_split = (float)(M_PI * EARTH_RADIUS_KM);  /* half map width */
+
     for (int ri = 1; ri <= num_circles; ri++) {
         double dist_km = ri * DIST_CIRCLE_STEP_KM;
         int seg_start = md->vertex_count;
         int in_seg = 0;
+        float prev_x = 0.0f;
 
         for (int i = 0; i <= DIST_CIRCLE_PTS && md->vertex_count < max_verts; i++) {
             double bearing = 2.0 * M_PI * i / DIST_CIRCLE_PTS;
@@ -213,7 +222,13 @@ void grid_build_dist_circles(MapData *md, double center_lat, double center_lon)
             double lon_deg = dlon * 180.0 / M_PI;
             double x, y;
             int rc = projection_forward(lat_deg, lon_deg, &x, &y);
-            if (rc < 0) {
+            int split = (rc < 0);
+            if (!split && is_merc && in_seg > 0) {
+                float dx = (float)x - prev_x;
+                if (dx > merc_split || dx < -merc_split)
+                    split = 1;
+            }
+            if (split) {
                 if (in_seg >= 2 && md->num_segments < MAX_SEGMENTS) {
                     md->segment_starts[md->num_segments] = seg_start;
                     md->segment_counts[md->num_segments] = in_seg;
@@ -224,6 +239,7 @@ void grid_build_dist_circles(MapData *md, double center_lat, double center_lon)
                 seg_start = md->vertex_count;
                 continue;
             }
+            prev_x = (float)x;
             md->vertices[md->vertex_count * 2]     = (float)x;
             md->vertices[md->vertex_count * 2 + 1] = (float)y;
             md->vertex_count++;

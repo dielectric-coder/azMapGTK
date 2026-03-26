@@ -51,13 +51,21 @@ static float zenith_to_alpha(double z, int wide_gradient)
     return (float)(t * MAX_ALPHA);
 }
 
+/* Rectangular grid dimensions for Mercator.
+ * High Y resolution needed because the twilight gradient runs horizontally
+ * and each cell boundary creates a visible step in the alpha ramp. */
+#define MERC_NX  360
+#define MERC_NY  540
+
 void nightmesh_init(NightMesh *nm)
 {
     /* Inner ring: ANGULAR_DIVS triangles (3 verts each)
      * Outer rings: ANGULAR_DIVS * (RADIAL_DIVS-1) quads * 2 tris * 3 verts
-     * Use AZEQ count (larger) for allocation */
-    int max_divs = RADIAL_DIVS_AZEQ;
-    int max_verts = ANGULAR_DIVS * 3 + ANGULAR_DIVS * (max_divs - 1) * 6;
+     * Use AZEQ count (larger) for allocation.
+     * Mercator: MERC_NX * MERC_NY quads * 2 tris * 3 verts. */
+    int polar_verts = ANGULAR_DIVS * 3 + ANGULAR_DIVS * (RADIAL_DIVS_AZEQ - 1) * 6;
+    int merc_verts = MERC_NX * MERC_NY * 6;
+    int max_verts = polar_verts > merc_verts ? polar_verts : merc_verts;
     nm->vertices = malloc(max_verts * 3 * sizeof(float));
     if (!nm->vertices) { nm->capacity = 0; nm->vertex_count = 0; return; }
     nm->capacity = max_verts;
@@ -75,8 +83,66 @@ static void emit_vert(NightMesh *nm, float x, float y, float alpha)
     }
 }
 
+static void nightmesh_build_mercator(NightMesh *nm, const SubsolarPoint *sun)
+{
+    nm->vertex_count = 0;
+
+    float hw = (float)(M_PI * EARTH_RADIUS_KM);
+    float hh = (float)projection_mercator_ymax();
+    float dx = 2.0f * hw / MERC_NX;
+    float dy = 2.0f * hh / MERC_NY;
+
+    /* Precompute alpha grid */
+    int rows = MERC_NY + 1, cols = MERC_NX + 1;
+    float *ag = malloc(rows * cols * sizeof(float));
+    if (!ag) return;
+
+    for (int yi = 0; yi <= MERC_NY; yi++) {
+        float y = -hh + yi * dy;
+        for (int xi = 0; xi <= MERC_NX; xi++) {
+            float x = -hw + xi * dx;
+            double lat, lon;
+            float av = MAX_ALPHA;
+            if (projection_inverse((double)x, (double)y, &lat, &lon) == 0)
+                av = zenith_to_alpha(solar_zenith_angle(lat, lon, sun), 1);
+            ag[yi * cols + xi] = av;
+        }
+    }
+
+    for (int yi = 0; yi < MERC_NY; yi++) {
+        float y0 = -hh + yi * dy;
+        float y1 = y0 + dy;
+        for (int xi = 0; xi < MERC_NX; xi++) {
+            float x0 = -hw + xi * dx;
+            float x1 = x0 + dx;
+
+            float a00 = ag[yi * cols + xi];
+            float a10 = ag[yi * cols + xi + 1];
+            float a01 = ag[(yi+1) * cols + xi];
+            float a11 = ag[(yi+1) * cols + xi + 1];
+
+            if (a00 == 0.0f && a10 == 0.0f && a01 == 0.0f && a11 == 0.0f)
+                continue;
+
+            emit_vert(nm, x0, y0, a00);
+            emit_vert(nm, x1, y0, a10);
+            emit_vert(nm, x1, y1, a11);
+
+            emit_vert(nm, x0, y0, a00);
+            emit_vert(nm, x1, y1, a11);
+            emit_vert(nm, x0, y1, a01);
+        }
+    }
+    free(ag);
+}
+
 void nightmesh_build(NightMesh *nm, const SubsolarPoint *sun)
 {
+    if (projection_get_mode() == PROJ_MERCATOR) {
+        nightmesh_build_mercator(nm, sun);
+        return;
+    }
+
     int is_azeq = (projection_get_mode() != PROJ_ORTHO);
     int radial_divs = is_azeq ? RADIAL_DIVS_AZEQ : RADIAL_DIVS_ORTHO;
     double max_r = projection_get_radius() - 0.5; /* inset to avoid float-precision boundary miss */

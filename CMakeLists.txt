@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 cmake_minimum_required(VERSION 3.16)
-project(azmap-gtk VERSION 0.1.0 LANGUAGES C)
+project(azmap-gtk VERSION 0.2.0 LANGUAGES C)
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/.local" CACHE PATH "Install prefix" FORCE)

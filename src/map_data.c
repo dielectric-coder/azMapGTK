@@ -233,14 +233,12 @@ int map_data_load_append(MapData *md, const char *shp_path)
     return 0;
 }
 
-/* Distance-based clipping state for AZEQ mode.
- * In AZEQ there is no hemisphere boundary, so we clip at a max angular
- * distance from the center instead.  These statics are set once per
- * project_nosplit() call and read by is_back_vertex / find_boundary_crossing. */
-static int  clip_use_dist;
+/* Clipping state set once per project_nosplit() call.
+ * ORTHO: clips at hemisphere boundary via projection_forward() returning -1.
+ * AZEQ:  clips at 175° angular distance from center. */
+static int    clip_use_dist;
 static double clip_clat, clip_clon, clip_max_dist;
 
-/* Unified back-vertex test: hemisphere boundary (ORTHO) or distance (AZEQ). */
 static int is_back_vertex(double lat, double lon)
 {
     if (clip_use_dist)
@@ -275,14 +273,96 @@ static void project_nosplit(MapData *md)
 {
     free(md->vertices);
 
-    /* Set up clipping mode: ORTHO clips at hemisphere boundary,
-     * AZEQ clips at 175° angular distance from center. */
+    int is_merc = (projection_get_mode() == PROJ_MERCATOR);
     int is_azeq = (projection_get_mode() == PROJ_AZEQ);
-    clip_use_dist = is_azeq;
-    if (is_azeq) {
-        projection_get_center(&clip_clat, &clip_clon);
-        clip_max_dist = 175.0 / 180.0 * M_PI * EARTH_RADIUS_KM;
+
+    /* Mercator: no clipping — project each ring with per-ring longitude
+     * wrapping so that all vertices within a ring have continuous
+     * x-coordinates.  The stencil disc masks pixels outside the map.
+     * This avoids the self-intersecting "shortcut" edges that clipping
+     * would create at the antimeridian. */
+    if (is_merc) {
+        double clon;
+        { double dummy; projection_get_center(&dummy, &clon); }
+
+        md->vertices = malloc(md->raw_count * 2 * sizeof(float));
+        if (!md->vertices) { md->vertex_count = 0; md->num_segments = 0; return; }
+        md->vertex_count = md->raw_count;
+        md->num_segments = md->raw_num_segments;
+
+        double map_hw = M_PI * EARTH_RADIUS_KM;  /* half-width = πR */
+
+        for (int s = 0; s < md->raw_num_segments; s++) {
+            int base = md->raw_seg_starts[s];
+            int count = md->raw_seg_counts[s];
+
+            /* Compute average dlon for ring-level wrapping */
+            double dlon_sum = 0;
+            for (int v = 0; v < count; v++)
+                dlon_sum += md->raw_lons[base + v] - clon;
+            double dlon_avg = dlon_sum / count;
+            double wrap = 0;
+            if (dlon_avg >  180.0) wrap = -360.0;
+            else if (dlon_avg < -180.0) wrap = 360.0;
+
+            /* Check if ring is entirely outside the visible area */
+            double xmin = 1e18, xmax = -1e18;
+            for (int v = 0; v < count; v++) {
+                double dl = (md->raw_lons[base + v] - clon + wrap) * (M_PI / 180.0);
+                double xv = EARTH_RADIUS_KM * dl;
+                if (xv < xmin) xmin = xv;
+                if (xv > xmax) xmax = xv;
+            }
+            if (xmin > map_hw || xmax < -map_hw) {
+                /* Entirely outside — skip */
+                md->segment_starts[s] = base;
+                md->segment_counts[s] = 0;
+                md->segment_clamped[s] = 1;
+                continue;
+            }
+
+            /* Check for raw-dateline-crossing edges (shapefile split artifacts) */
+            int bad_ring = 0;
+            for (int v = 0; v < count && !bad_ring; v++) {
+                double dl = md->raw_lons[base + (v + 1) % count]
+                          - md->raw_lons[base + v];
+                if (dl >  180.0) dl -= 360.0;
+                if (dl < -180.0) dl += 360.0;
+                if (fabs(dl) > 90.0) bad_ring = 1;
+            }
+            if (bad_ring) {
+                md->segment_starts[s] = base;
+                md->segment_counts[s] = 0;
+                md->segment_clamped[s] = 1;
+                continue;
+            }
+
+            md->segment_starts[s] = base;
+            md->segment_counts[s] = count;
+            md->segment_clamped[s] = 0;
+
+            /* Project with per-ring wrapping (no per-vertex dl clamping) */
+            for (int v = 0; v < count; v++) {
+                int i = base + v;
+                double lat = md->raw_lats[i];
+                if (lat >  85.05) lat =  85.05;
+                if (lat < -85.05) lat = -85.05;
+                double lat_r = lat * (M_PI / 180.0);
+                double dl = (md->raw_lons[i] - clon + wrap) * (M_PI / 180.0);
+                md->vertices[i * 2]     = (float)(EARTH_RADIUS_KM * dl);
+                md->vertices[i * 2 + 1] = (float)(EARTH_RADIUS_KM *
+                                            log(tan(M_PI / 4.0 + lat_r / 2.0)));
+            }
+        }
+
+        return;  /* Mercator done — skip ORTHO/AZEQ clipping path */
     }
+
+    /* ORTHO/AZEQ clipping path */
+    clip_use_dist = is_azeq;
+    projection_get_center(&clip_clat, &clip_clon);
+    if (is_azeq)
+        clip_max_dist = 175.0 / 180.0 * M_PI * EARTH_RADIUS_KM;
 
     /* Mark each vertex as inside (0) or outside (1) the clipping boundary */
     int *back = malloc(md->raw_count * sizeof(int));
@@ -320,7 +400,6 @@ static void project_nosplit(MapData *md)
         }
 
         if (!has_front) {
-            /* Entirely back-hemisphere — skip */
             md->segment_starts[s] = ring_start;
             md->segment_counts[s] = 0;
             md->segment_clamped[s] = 1;
@@ -330,14 +409,12 @@ static void project_nosplit(MapData *md)
         md->segment_clamped[s] = 0;
 
         if (!has_back) {
-            /* Entirely front-hemisphere — copy as-is */
             for (int v = 0; v < count; v++) {
                 clip_lats[clip_count] = md->raw_lats[base + v];
                 clip_lons[clip_count] = md->raw_lons[base + v];
                 clip_count++;
             }
         } else {
-            /* Clip: emit front vertices and boundary crossings, skip back vertices */
             for (int v = 0; v < count; v++) {
                 int ci = base + v;
                 int ni = base + (v + 1) % count;
@@ -363,7 +440,6 @@ static void project_nosplit(MapData *md)
 
         int seg_count = clip_count - ring_start;
         if (seg_count < 3) {
-            /* Too few vertices for a triangle fan — discard */
             clip_count = ring_start;
             md->segment_starts[s] = ring_start;
             md->segment_counts[s] = 0;

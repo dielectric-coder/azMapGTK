@@ -48,7 +48,8 @@ ProjMode projection_get_mode(void) { return proj_mode; }
 
 double projection_get_radius(void)
 {
-    return (proj_mode == PROJ_ORTHO) ? EARTH_RADIUS_KM : EARTH_MAX_PROJ_RADIUS;
+    if (proj_mode == PROJ_ORTHO) return EARTH_RADIUS_KM;
+    return EARTH_MAX_PROJ_RADIUS;  /* AZEQ and Mercator share the same extent */
 }
 
 void projection_set_center(double lat_deg, double lon_deg)
@@ -85,6 +86,21 @@ int projection_forward(double lat_deg, double lon_deg, double *x, double *y)
     /* Clamp for numerical safety */
     if (cos_c > 1.0) cos_c = 1.0;
     if (cos_c < -1.0) cos_c = -1.0;
+
+    if (proj_mode == PROJ_MERCATOR) {
+        /* Clamp latitude to avoid infinity at poles */
+        double lat_clamp = lat_deg;
+        if (lat_clamp >  85.05) lat_clamp =  85.05;
+        if (lat_clamp < -85.05) lat_clamp = -85.05;
+        double lat_r = lat_clamp * DEG2RAD;
+        /* Wrap longitude relative to center */
+        double dl = lon - center_lon_rad;
+        if (dl >  M_PI) dl -= 2.0 * M_PI;
+        if (dl < -M_PI) dl += 2.0 * M_PI;
+        *x = EARTH_RADIUS_KM * dl;
+        *y = EARTH_RADIUS_KM * log(tan(M_PI / 4.0 + lat_r / 2.0));
+        return 0;
+    }
 
     if (proj_mode == PROJ_ORTHO) {
         if (cos_c <= 0.0) {
@@ -132,6 +148,9 @@ int projection_forward_clamped(double lat_deg, double lon_deg, double *x, double
     if (cos_c > 1.0) cos_c = 1.0;
     if (cos_c < -1.0) cos_c = -1.0;
 
+    if (proj_mode == PROJ_MERCATOR)
+        return projection_forward(lat_deg, lon_deg, x, y);
+
     if (proj_mode == PROJ_ORTHO) {
         double px = EARTH_RADIUS_KM * cos_lat * sin(dlon);
         double py = EARTH_RADIUS_KM * (cos_clat * sin_lat - sin_clat * cos_lat * cos_dlon);
@@ -178,6 +197,14 @@ int projection_inverse(double x, double y, double *lat_deg, double *lon_deg)
         return 0;
     }
 
+    if (proj_mode == PROJ_MERCATOR) {
+        *lon_deg = (x / EARTH_RADIUS_KM) * RAD2DEG + center_lon_deg_store;
+        if (*lon_deg >  180.0) *lon_deg -= 360.0;
+        if (*lon_deg < -180.0) *lon_deg += 360.0;
+        *lat_deg = (2.0 * atan(exp(y / EARTH_RADIUS_KM)) - M_PI / 2.0) * RAD2DEG;
+        return 0;
+    }
+
     double c, sin_c, cos_c;
 
     if (proj_mode == PROJ_ORTHO) {
@@ -209,6 +236,12 @@ int projection_inverse(double x, double y, double *lat_deg, double *lon_deg)
     *lat_deg = lat * RAD2DEG;
     *lon_deg = lon * RAD2DEG;
     return 0;
+}
+
+double projection_mercator_ymax(void)
+{
+    double lat_r = 85.05 * DEG2RAD;
+    return EARTH_RADIUS_KM * log(tan(M_PI / 4.0 + lat_r / 2.0));
 }
 
 /* Great-circle distance using the Haversine formula (numerically stable for

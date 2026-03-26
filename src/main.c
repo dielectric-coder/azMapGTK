@@ -82,6 +82,7 @@ typedef struct {
     GtkWidget *lbl_az_from;
     GtkWidget *lbl_station_info[6];
     GtkWidget *btn_proj;
+    GtkWidget *lbl_proj_mode;
     GtkWidget *btn_home;
     GtkWidget *btn_aurora;
     GtkWidget *btn_spore;
@@ -565,7 +566,7 @@ static gboolean on_render(GtkGLArea *area, GdkGLContext *context, gpointer data)
         update_target_geometry(s, 0);
         projection_forward(90.0, 0.0, &s->npx, &s->npy);
 
-        if (projection_get_mode() == PROJ_ORTHO) {
+        if (projection_get_mode() != PROJ_AZEQ) {
             grid_build_geo(&s->grid);
             renderer_upload_grid(&s->renderer, &s->grid);
         }
@@ -1189,33 +1190,56 @@ static gboolean on_fifo_readable(GIOChannel *source, GIOCondition cond, gpointer
 
 /* ── Button callbacks ──────────────────────────────────────────── */
 
-static void on_proj_toggle(GtkToggleButton *btn, gpointer data)
+static const char *proj_label(ProjMode m)
 {
+    switch (m) {
+    case PROJ_AZEQ:     return "AZEQ";
+    case PROJ_ORTHO:    return "ORTHO";
+    case PROJ_MERCATOR: return "MERC";
+    }
+    return "AZEQ";
+}
+
+static void on_proj_cycle(GtkButton *btn, gpointer data)
+{
+    (void)btn;
     AppState *s = (AppState *)data;
     if (!s->gl_initialized) return;
 
     gtk_gl_area_make_current(GTK_GL_AREA(s->gl_area));
 
-    if (gtk_toggle_button_get_active(btn)) {
-        projection_set_mode(PROJ_ORTHO);
-    } else {
-        projection_set_mode(PROJ_AZEQ);
-        /* Reset view (same as pressing R) */
-        camera_reset(&s->cam);
+    ProjMode cur = projection_get_mode();
+    ProjMode next;
+    switch (cur) {
+    case PROJ_AZEQ:     next = PROJ_ORTHO;    break;
+    case PROJ_ORTHO:    next = PROJ_MERCATOR;  break;
+    case PROJ_MERCATOR: next = PROJ_AZEQ;     break;
+    default:            next = PROJ_AZEQ;     break;
+    }
+
+    projection_set_mode(next);
+    gtk_label_set_text(GTK_LABEL(s->lbl_proj_mode), proj_label(next));
+
+    if (next == PROJ_AZEQ) {
         s->input.center_lat = s->input.original_center_lat;
         s->input.center_lon = s->input.original_center_lon;
         projection_set_center(s->input.center_lat, s->input.center_lon);
     }
+
+    /* All modes: fill the display area with the earth. */
+    s->cam.zoom_km = 2.0f * (float)projection_get_radius();
+    s->cam.pan_x = 0.0f;
+    s->cam.pan_y = 0.0f;
 
     renderer_upload_earth_circle(&s->renderer, projection_get_radius());
     reproject_all(s);
     update_target_geometry(s, 0);
     projection_forward(90.0, 0.0, &s->npx, &s->npy);
 
-    if (projection_get_mode() == PROJ_ORTHO)
-        grid_build_geo(&s->grid);
-    else
+    if (projection_get_mode() == PROJ_AZEQ)
         grid_build(&s->grid);
+    else
+        grid_build_geo(&s->grid);
     renderer_upload_grid(&s->renderer, &s->grid);
     grid_build_dist_circles(&s->dist_circles, s->qth_lat, s->qth_lon);
     renderer_upload_dist_circles(&s->renderer, &s->dist_circles);
@@ -1288,10 +1312,10 @@ static void on_swap_source_target(InputState *is, void *user_data)
         update_target_geometry(s, 1);
         projection_forward(90.0, 0.0, &s->npx, &s->npy);
 
-        if (projection_get_mode() == PROJ_ORTHO)
-            grid_build_geo(&s->grid);
-        else
+        if (projection_get_mode() == PROJ_AZEQ)
             grid_build(&s->grid);
+        else
+            grid_build_geo(&s->grid);
         renderer_upload_grid(&s->renderer, &s->grid);
         grid_build_dist_circles(&s->dist_circles, s->qth_lat, s->qth_lon);
         renderer_upload_dist_circles(&s->renderer, &s->dist_circles);
@@ -1319,6 +1343,7 @@ static void on_home_clicked(GtkButton *btn, gpointer data)
     s->input.center_lon = s->input.original_center_lon;
     s->cam.pan_x = 0.0f;
     s->cam.pan_y = 0.0f;
+    s->cam.zoom_km = 2.0f * (float)projection_get_radius();
     s->input.center_dirty = 1;
     gtk_widget_queue_draw(s->gl_area);
 }
@@ -1897,14 +1922,15 @@ static void activate(GtkApplication *app, gpointer user_data)
     gtk_widget_set_size_request(ctrl_box, SIDEBAR_WIDTH / 2, -1);
     gtk_box_append(GTK_BOX(sidebar), ctrl_box);
 
-    s->btn_proj = gtk_toggle_button_new_with_label("ORTHO");
-    if (projection_get_mode() == PROJ_ORTHO)
-        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(s->btn_proj), TRUE);
+    s->btn_proj = gtk_button_new_with_label("PROJ");
+    s->lbl_proj_mode = gtk_label_new(proj_label(projection_get_mode()));
+    gtk_widget_add_css_class(s->lbl_proj_mode, "info-label");
     s->btn_home = gtk_button_new_with_label("HOME");
     gtk_box_append(GTK_BOX(ctrl_box), s->btn_proj);
+    gtk_box_append(GTK_BOX(ctrl_box), s->lbl_proj_mode);
     gtk_box_append(GTK_BOX(ctrl_box), s->btn_home);
 
-    g_signal_connect(s->btn_proj, "toggled", G_CALLBACK(on_proj_toggle), s);
+    g_signal_connect(s->btn_proj, "clicked", G_CALLBACK(on_proj_cycle), s);
     g_signal_connect(s->btn_home, "clicked", G_CALLBACK(on_home_clicked), s);
 
     GtkWidget *map_sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
@@ -2214,8 +2240,11 @@ int main(int argc, char **argv)
         center_lat = cfg.view_center_lat;
         center_lon = cfg.view_center_lon;
     }
-    if (cfg.view_valid && cfg.view_proj_mode == 1)
-        projection_set_mode(PROJ_ORTHO);
+    if (cfg.view_valid) {
+        if (cfg.view_proj_mode == 1) projection_set_mode(PROJ_ORTHO);
+        else if (cfg.view_proj_mode == 2)
+            projection_set_mode(PROJ_MERCATOR);
+    }
 
     projection_set_center(center_lat, center_lon);
 
@@ -2295,10 +2324,10 @@ int main(int argc, char **argv)
 
     /* Build grid */
     memset(&s->grid, 0, sizeof(s->grid));
-    if (projection_get_mode() == PROJ_ORTHO)
-        grid_build_geo(&s->grid);
-    else
+    if (projection_get_mode() == PROJ_AZEQ)
         grid_build(&s->grid);
+    else
+        grid_build_geo(&s->grid);
 
     /* Distance circles */
     memset(&s->dist_circles, 0, sizeof(s->dist_circles));

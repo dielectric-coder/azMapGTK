@@ -42,7 +42,7 @@ typedef struct {
     /* Persisted view state */
     float  view_zoom_km;
     float  view_pan_x, view_pan_y;
-    int    view_proj_mode;     /* 0=PROJ_AZEQ, 1=PROJ_ORTHO */
+    int    view_proj_mode;     /* 0=PROJ_AZEQ, 1=PROJ_ORTHO, 2=PROJ_MERCATOR */
     double view_center_lat, view_center_lon;
     int    view_valid;         /* 1 if view state keys found */
 

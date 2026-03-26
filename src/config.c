@@ -151,6 +151,8 @@ int config_load(Config *cfg)
         } else if (strcmp(key, "view_proj_mode") == 0) {
             if (strcmp(val, "ortho") == 0)
                 cfg->view_proj_mode = 1;
+            else if (strcmp(val, "mercator") == 0)
+                cfg->view_proj_mode = 2;
             else
                 cfg->view_proj_mode = 0;
             has_vproj = 1;
@@ -237,7 +239,8 @@ int config_save_state(double target_lat, double target_lon, const char *target_n
     snprintf(new_vals[3], sizeof(new_vals[3]), "view_zoom_km = %.2f", zoom_km);
     snprintf(new_vals[4], sizeof(new_vals[4]), "view_pan_x = %.2f", pan_x);
     snprintf(new_vals[5], sizeof(new_vals[5]), "view_pan_y = %.2f", pan_y);
-    snprintf(new_vals[6], sizeof(new_vals[6]), "view_proj_mode = %s", proj_mode == 1 ? "ortho" : "azeq");
+    snprintf(new_vals[6], sizeof(new_vals[6]), "view_proj_mode = %s",
+             proj_mode == 2 ? "mercator" : proj_mode == 1 ? "ortho" : "azeq");
     snprintf(new_vals[7], sizeof(new_vals[7]), "view_center_lat = %.6f", center_lat);
     snprintf(new_vals[8], sizeof(new_vals[8]), "view_center_lon = %.6f", center_lon);
     snprintf(new_vals[9], sizeof(new_vals[9]), "window_w = %d", window_w);

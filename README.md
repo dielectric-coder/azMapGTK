@@ -6,13 +6,14 @@ GTK4 port of [azMap](https://github.com/mikelisfbay/azMap) — an interactive az
 
 ## Features
 
-- Azimuthal equidistant and orthographic projection modes
+- Azimuthal equidistant, orthographic, and Mercator projection modes
 - Great circle path, distance, and azimuth display
 - Day/night terminator overlay with twilight gradient
 - HF propagation overlays: MUF contours (KC2G), Sporadic E (KC2G), Aurora (NOAA OVATION), DRAP absorption (NOAA SWPC)
 - Geomagnetic indices (Kp, Bz), solar indices (SFU, SSN), solar wind speed
 - NOAA space weather scales, X-ray flare classification, CH HSS prediction
 - QRZ.com callsign lookup
+- NCDXF/IARU beacon system with per-band color coding
 - Distance circles (2000 km intervals)
 - FIFO IPC for target updates from external applications (`$XDG_RUNTIME_DIR/azmap-target.fifo`)
 - Zoom, pan, and keyboard navigation
@@ -97,15 +98,16 @@ qrz_pass = yourpassword
 
 ## Controls
 
-| Input | AZEQ Mode | ORTHO Mode |
-|-------|-----------|------------|
-| Scroll | Zoom in/out | Zoom in/out |
-| Drag | Pan (camera) | Rotate globe |
-| Arrow keys | Pan (camera) | Rotate globe |
-| R | Reset view | Reset view |
-| X | Swap source (QTH) ↔ target | Swap source (QTH) ↔ target |
-| HOME button | Recenter (keep zoom) | Recenter (keep zoom) |
-| Q / Esc | Quit | Quit |
+| Input | AZEQ Mode | ORTHO Mode | MERC Mode |
+|-------|-----------|------------|-----------|
+| Scroll | Zoom in/out | Zoom in/out | Zoom in/out |
+| Drag | Pan (camera) | Rotate globe | Shift longitude + vertical pan |
+| Arrow keys | Pan (camera) | Rotate globe | Left/Right shift longitude, Up/Down pan |
+| R | Reset view | Reset view | Reset view |
+| X | Swap source (QTH) ↔ target | Swap source (QTH) ↔ target | Swap source (QTH) ↔ target |
+| PROJ button | Cycle: AZEQ → ORTHO → MERC | | |
+| HOME button | Recenter + reset zoom | Recenter + reset zoom | Recenter + reset zoom |
+| Q / Esc | Quit | Quit | Quit |
 
 ## Architecture
 
@@ -116,7 +118,7 @@ src/
 ├── main.c          GTK4 application, GtkGLArea + sidebar, timers, FIFO IPC
 ├── input.c         GTK4 event controllers (scroll/drag/key)
 ├── renderer.c      Map-only OpenGL renderer (no sidebar GL code)
-├── projection.c    Azimuthal equidistant + orthographic projections
+├── projection.c    Azimuthal equidistant, orthographic + Mercator projections
 ├── map_data.c      Shapefile loading, vertex arrays, boundary clipping
 ├── grid.c          Graticule + distance circles
 ├── overlay.c       MUF, Sporadic E, Aurora, DRAP overlays

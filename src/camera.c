@@ -53,6 +53,8 @@ void camera_reset(Camera *cam)
     cam->pan_y = 0.0f;
 }
 
+
+
 void camera_get_mvp(const Camera *cam, float *m)
 {
     /* Orthographic projection: maps km-space to clip [-1,1].

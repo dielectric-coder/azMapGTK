@@ -87,6 +87,14 @@ static void on_drag_update(GtkGestureDrag *gesture, double off_x, double off_y, 
     if (projection_get_mode() == PROJ_AZEQ) {
         /* AZEQ: camera pan only — no globe rotation */
         camera_pan(is->cam, (float)dx_km, (float)dy_km);
+    } else if (projection_get_mode() == PROJ_MERCATOR) {
+        /* Mercator: longitude shifts globe, latitude pans camera */
+        double dlon = dx_km / (EARTH_R * DEG2RAD);
+        is->center_lon += dlon;
+        while (is->center_lon > 180.0) is->center_lon -= 360.0;
+        while (is->center_lon < -180.0) is->center_lon += 360.0;
+        is->center_dirty = 1;
+        camera_pan(is->cam, 0.0f, (float)dy_km);
     } else {
         /* ORTHO: rotate globe by changing projection center */
         double dlat = dy_km / (EARTH_R * DEG2RAD);
@@ -127,9 +135,10 @@ static gboolean on_key_pressed(GtkEventControllerKey *ctrl,
     double pan_step = is->cam->zoom_km / (EARTH_R * 2.0 * M_PI) * 30.0;
     float pan_km = (float)(pan_step * EARTH_R * DEG2RAD);
 
+    ProjMode mode = projection_get_mode();
     switch (keyval) {
     case GDK_KEY_Left:
-        if (projection_get_mode() == PROJ_AZEQ) {
+        if (mode == PROJ_AZEQ) {
             camera_pan(is->cam, -pan_km, 0.0f);
         } else {
             is->center_lon -= pan_step;
@@ -139,7 +148,7 @@ static gboolean on_key_pressed(GtkEventControllerKey *ctrl,
         gtk_widget_queue_draw(is->gl_area);
         return TRUE;
     case GDK_KEY_Right:
-        if (projection_get_mode() == PROJ_AZEQ) {
+        if (mode == PROJ_AZEQ) {
             camera_pan(is->cam, pan_km, 0.0f);
         } else {
             is->center_lon += pan_step;
@@ -149,7 +158,7 @@ static gboolean on_key_pressed(GtkEventControllerKey *ctrl,
         gtk_widget_queue_draw(is->gl_area);
         return TRUE;
     case GDK_KEY_Up:
-        if (projection_get_mode() == PROJ_AZEQ) {
+        if (mode == PROJ_AZEQ || mode == PROJ_MERCATOR) {
             camera_pan(is->cam, 0.0f, pan_km);
         } else {
             is->center_lat += pan_step;
@@ -159,7 +168,7 @@ static gboolean on_key_pressed(GtkEventControllerKey *ctrl,
         gtk_widget_queue_draw(is->gl_area);
         return TRUE;
     case GDK_KEY_Down:
-        if (projection_get_mode() == PROJ_AZEQ) {
+        if (mode == PROJ_AZEQ || mode == PROJ_MERCATOR) {
             camera_pan(is->cam, 0.0f, -pan_km);
         } else {
             is->center_lat -= pan_step;

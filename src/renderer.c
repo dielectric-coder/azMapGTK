@@ -216,18 +216,21 @@ void renderer_upload_land(Renderer *r, const MapData *md)
     }
     glBindVertexArray(r->land_vao);
     glBindBuffer(GL_ARRAY_BUFFER, r->land_vbo);
+
+    int nseg = md->num_segments < MAX_SEGMENTS ? md->num_segments : MAX_SEGMENTS;
+
     glBufferData(GL_ARRAY_BUFFER, md->vertex_count * 2 * sizeof(float),
                  md->vertices, GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
-    glBindVertexArray(0);
-
-    r->land_num_segments = md->num_segments < MAX_SEGMENTS ? md->num_segments : MAX_SEGMENTS;
-    for (int i = 0; i < r->land_num_segments; i++) {
+    for (int i = 0; i < nseg; i++) {
         r->land_segment_starts[i] = md->segment_starts[i];
         r->land_segment_counts[i] = md->segment_counts[i];
         r->land_segment_clamped[i] = md->segment_clamped[i];
     }
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+    r->land_num_segments = nseg;
 }
 
 void renderer_upload_target_line(Renderer *r, const float *verts, int vertex_count)
@@ -319,14 +322,33 @@ void renderer_upload_npole(Renderer *r, float px, float py, float size_km)
 
 void renderer_upload_earth_circle(Renderer *r, double radius)
 {
-    int n = 360;
-    float *verts = malloc(n * 2 * sizeof(float));
-    if (!verts) return;
-    for (int i = 0; i < n; i++) {
-        double a = 2.0 * M_PI * i / n;
-        verts[i * 2]     = (float)(radius * cos(a));
-        verts[i * 2 + 1] = (float)(radius * sin(a));
+    int is_merc = (projection_get_mode() == PROJ_MERCATOR);
+
+    /* Boundary outline */
+    float *verts;
+    int n;
+    if (is_merc) {
+        /* Rectangle: 4 corners */
+        float hw = (float)(M_PI * EARTH_RADIUS_KM);
+        float hh = (float)projection_mercator_ymax();
+        n = 4;
+        verts = malloc(n * 2 * sizeof(float));
+        if (!verts) return;
+        verts[0] = -hw; verts[1] = -hh;
+        verts[2] =  hw; verts[3] = -hh;
+        verts[4] =  hw; verts[5] =  hh;
+        verts[6] = -hw; verts[7] =  hh;
+    } else {
+        n = 360;
+        verts = malloc(n * 2 * sizeof(float));
+        if (!verts) return;
+        for (int i = 0; i < n; i++) {
+            double a = 2.0 * M_PI * i / n;
+            verts[i * 2]     = (float)(radius * cos(a));
+            verts[i * 2 + 1] = (float)(radius * sin(a));
+        }
     }
+
     if (!r->circle_vao) {
         glGenVertexArrays(1, &r->circle_vao);
         glGenBuffers(1, &r->circle_vbo);
@@ -339,17 +361,35 @@ void renderer_upload_earth_circle(Renderer *r, double radius)
     glBindVertexArray(0);
     r->circle_vertex_count = n;
 
-    /* Filled disc (TRIANGLE_FAN: center + ring) */
-    int dn = n + 2;
-    float *dverts = malloc(dn * 2 * sizeof(float));
-    if (!dverts) { free(verts); return; }
-    dverts[0] = 0.0f;
-    dverts[1] = 0.0f;
-    for (int i = 0; i <= n; i++) {
-        double a = 2.0 * M_PI * (i % n) / n;
-        dverts[(i + 1) * 2]     = (float)(radius * cos(a));
-        dverts[(i + 1) * 2 + 1] = (float)(radius * sin(a));
+    /* Filled disc/rect (TRIANGLE_FAN) */
+    float *dverts;
+    int dn;
+    if (is_merc) {
+        /* Rectangle as triangle fan: center + 4 corners + close */
+        float hw = (float)(M_PI * EARTH_RADIUS_KM);
+        float hh = (float)projection_mercator_ymax();
+        dn = 6;
+        dverts = malloc(dn * 2 * sizeof(float));
+        if (!dverts) { free(verts); return; }
+        dverts[0] = 0.0f; dverts[1] = 0.0f;   /* center */
+        dverts[2] = -hw;  dverts[3] = -hh;
+        dverts[4] =  hw;  dverts[5] = -hh;
+        dverts[6] =  hw;  dverts[7] =  hh;
+        dverts[8] = -hw;  dverts[9] =  hh;
+        dverts[10]= -hw;  dverts[11]= -hh;     /* close */
+    } else {
+        dn = n + 2;
+        dverts = malloc(dn * 2 * sizeof(float));
+        if (!dverts) { free(verts); return; }
+        dverts[0] = 0.0f;
+        dverts[1] = 0.0f;
+        for (int i = 0; i <= n; i++) {
+            double a = 2.0 * M_PI * (i % n) / n;
+            dverts[(i + 1) * 2]     = (float)(radius * cos(a));
+            dverts[(i + 1) * 2 + 1] = (float)(radius * sin(a));
+        }
     }
+
     if (!r->disc_vao) {
         glGenVertexArrays(1, &r->disc_vao);
         glGenBuffers(1, &r->disc_vbo);
@@ -578,7 +618,7 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         glDrawArrays(GL_TRIANGLE_FAN, 0, r->disc_vertex_count);
     }
 
-    /* Land fill via stencil buffer */
+    /* Land fill via stencil buffer (odd-even rule). */
     if (r->land_vao && r->land_num_segments > 0 && r->disc_vao) {
         glEnable(GL_STENCIL_TEST);
         glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
@@ -619,7 +659,28 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         glDrawArrays(GL_LINE_LOOP, 0, r->circle_vertex_count);
     }
 
-    /* Grid */
+    /* Night overlay — drawn before grid so grid lines stay visible on top */
+    if (r->night_vao && r->night_vertex_count > 0) {
+        glUniform4f(r->color_loc, 0.0f, 0.0f, 0.05f, 1.0f);
+        glBindVertexArray(r->night_vao);
+        glDrawArrays(GL_TRIANGLES, 0, r->night_vertex_count);
+    }
+
+    /* Aurora overlay */
+    if (r->aurora_vao && r->aurora_vertex_count > 0) {
+        glUniform4f(r->color_loc, 0.0f, 0.8f, 0.2f, 1.0f);
+        glBindVertexArray(r->aurora_vao);
+        glDrawArrays(GL_TRIANGLES, 0, r->aurora_vertex_count);
+    }
+
+    /* DRAP overlay */
+    if (r->drap_vao && r->drap_vertex_count > 0) {
+        glUniform4f(r->color_loc, 0.85f, 0.2f, 0.05f, 1.0f);
+        glBindVertexArray(r->drap_vao);
+        glDrawArrays(GL_TRIANGLES, 0, r->drap_vertex_count);
+    }
+
+    /* Grid — drawn after night/overlays so lines stay visible in dark zones */
     if (r->grid_vao) {
         glUniform4f(r->color_loc, 0.2f, 0.2f, 0.3f, 1.0f);
         glBindVertexArray(r->grid_vao);
@@ -639,27 +700,6 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
                          r->dist_segment_starts[i],
                          r->dist_segment_counts[i]);
         }
-    }
-
-    /* Night overlay */
-    if (r->night_vao && r->night_vertex_count > 0) {
-        glUniform4f(r->color_loc, 0.0f, 0.0f, 0.05f, 1.0f);
-        glBindVertexArray(r->night_vao);
-        glDrawArrays(GL_TRIANGLES, 0, r->night_vertex_count);
-    }
-
-    /* Aurora overlay */
-    if (r->aurora_vao && r->aurora_vertex_count > 0) {
-        glUniform4f(r->color_loc, 0.0f, 0.8f, 0.2f, 1.0f);
-        glBindVertexArray(r->aurora_vao);
-        glDrawArrays(GL_TRIANGLES, 0, r->aurora_vertex_count);
-    }
-
-    /* DRAP overlay */
-    if (r->drap_vao && r->drap_vertex_count > 0) {
-        glUniform4f(r->color_loc, 0.85f, 0.2f, 0.05f, 1.0f);
-        glBindVertexArray(r->drap_vao);
-        glDrawArrays(GL_TRIANGLES, 0, r->drap_vertex_count);
     }
 
     /* Country borders */
@@ -824,10 +864,11 @@ void renderer_destroy(Renderer *r)
     if (r->beacon_vao) { glDeleteVertexArrays(1, &r->beacon_vao); glDeleteBuffers(1, &r->beacon_vbo); }
 }
 
-/* Beacon rendering — each beacon is a small diamond (4 triangles) in km-space.
+/* Beacon rendering — each beacon is a filled circle (triangle fan) in km-space.
  * This avoids GL_POINTS which may be clamped to 1px in core profile. */
 
-#define BEACON_MARKER_KM 80.0f  /* half-size of diamond marker in km */
+#define BEACON_RADIUS_KM 100.0f  /* radius of circle marker in km */
+#define BEACON_CIRCLE_SEGS 16    /* segments for circle approximation */
 
 void renderer_upload_beacons(Renderer *r, const BeaconSystem *sys)
 {
@@ -847,22 +888,30 @@ void renderer_upload_beacons(Renderer *r, const BeaconSystem *sys)
         glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 
-    /* Each beacon = 4 triangles (diamond) = 12 vertices.
+    /* Precompute unit circle points */
+    float ux[BEACON_CIRCLE_SEGS], uy[BEACON_CIRCLE_SEGS];
+    for (int i = 0; i < BEACON_CIRCLE_SEGS; i++) {
+        float a = 2.0f * (float)M_PI * i / BEACON_CIRCLE_SEGS;
+        ux[i] = cosf(a);
+        uy[i] = sinf(a);
+    }
+
+    /* Each beacon = BEACON_CIRCLE_SEGS triangles × 3 vertices.
      * Layout: silent beacons first, then band 0..4 groups. */
-    float *verts = malloc(sys->count * 12 * 2 * sizeof(float));
+    int verts_per_beacon = BEACON_CIRCLE_SEGS * 3;
+    float *verts = malloc(sys->count * verts_per_beacon * 2 * sizeof(float));
     if (!verts) return;
 
     int idx = 0;
-    float s = BEACON_MARKER_KM;
+    float rad = BEACON_RADIUS_KM;
 
-    /* Helper macro: emit one diamond at (cx,cy) */
-    #define EMIT_DIAMOND(cx, cy) do { \
-        float _pts[4][2] = {{cx, (cy)+s}, {(cx)+s, cy}, {cx, (cy)-s}, {(cx)-s, cy}}; \
-        for (int _t = 0; _t < 4; _t++) { \
-            int _n = (_t + 1) % 4; \
-            verts[idx++] = cx;           verts[idx++] = cy; \
-            verts[idx++] = _pts[_t][0];  verts[idx++] = _pts[_t][1]; \
-            verts[idx++] = _pts[_n][0];  verts[idx++] = _pts[_n][1]; \
+    /* Helper macro: emit one filled circle at (cx,cy) */
+    #define EMIT_CIRCLE(cx, cy) do { \
+        for (int _i = 0; _i < BEACON_CIRCLE_SEGS; _i++) { \
+            int _n = (_i + 1) % BEACON_CIRCLE_SEGS; \
+            verts[idx++] = cx;                verts[idx++] = cy; \
+            verts[idx++] = (cx) + rad*ux[_i]; verts[idx++] = (cy) + rad*uy[_i]; \
+            verts[idx++] = (cx) + rad*ux[_n]; verts[idx++] = (cy) + rad*uy[_n]; \
         } \
     } while(0)
 
@@ -873,7 +922,7 @@ void renderer_upload_beacons(Renderer *r, const BeaconSystem *sys)
         if (projection_forward(sys->beacons[i].lat, sys->beacons[i].lon, &px, &py) != 0)
             continue;
         float cx = (float)px, cy = (float)py;
-        EMIT_DIAMOND(cx, cy);
+        EMIT_CIRCLE(cx, cy);
     }
     r->beacon_inactive_count = idx / 2;
 
@@ -887,11 +936,11 @@ void renderer_upload_beacons(Renderer *r, const BeaconSystem *sys)
             if (projection_forward(sys->beacons[i].lat, sys->beacons[i].lon, &px, &py) != 0)
                 continue;
             float cx = (float)px, cy = (float)py;
-            EMIT_DIAMOND(cx, cy);
+            EMIT_CIRCLE(cx, cy);
         }
         r->beacon_band_count[b] = idx / 2 - r->beacon_band_start[b];
     }
-    #undef EMIT_DIAMOND
+    #undef EMIT_CIRCLE
 
     int total_verts = idx / 2;
     glBindVertexArray(r->beacon_vao);

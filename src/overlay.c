@@ -813,8 +813,12 @@ void aurora_mesh_init(AuroraMesh *m)
     /* Same grid resolution as nightmesh */
     #define AURORA_ANGULAR_DIVS  180
     #define AURORA_RADIAL_DIVS    60
-    int max_verts = AURORA_ANGULAR_DIVS * 3 +
-                    AURORA_ANGULAR_DIVS * (AURORA_RADIAL_DIVS - 1) * 6;
+    #define OVERLAY_MERC_NX 360
+    #define OVERLAY_MERC_NY 360
+    int polar_verts = AURORA_ANGULAR_DIVS * 3 +
+                      AURORA_ANGULAR_DIVS * (AURORA_RADIAL_DIVS - 1) * 6;
+    int merc_verts = OVERLAY_MERC_NX * OVERLAY_MERC_NY * 6;
+    int max_verts = polar_verts > merc_verts ? polar_verts : merc_verts;
     m->vertices = malloc(max_verts * 3 * sizeof(float));
     if (!m->vertices) { m->capacity = 0; m->vertex_count = 0; return; }
     m->capacity = max_verts;
@@ -864,9 +868,50 @@ static float aurora_lookup(const AuroraGrid *g, double lat, double lon)
     return 0.5f + (float)(val - 50) / 50.0f * 0.25f;
 }
 
+static void aurora_mesh_build_mercator(AuroraMesh *m, const AuroraGrid *g)
+{
+    float hw = (float)(M_PI * EARTH_RADIUS_KM);
+    float hh = (float)projection_mercator_ymax();
+    float dx = 2.0f * hw / OVERLAY_MERC_NX;
+    float dy = 2.0f * hh / OVERLAY_MERC_NY;
+    int cols = OVERLAY_MERC_NX + 1, rows = OVERLAY_MERC_NY + 1;
+    float *ag = malloc(rows * cols * sizeof(float));
+    if (!ag) return;
+
+    m->vertex_count = 0;
+    for (int yi = 0; yi <= OVERLAY_MERC_NY; yi++) {
+        float y = -hh + yi * dy;
+        for (int xi = 0; xi <= OVERLAY_MERC_NX; xi++) {
+            float x = -hw + xi * dx;
+            double lat, lon;
+            float av = 0.0f;
+            if (projection_inverse((double)x, (double)y, &lat, &lon) == 0)
+                av = aurora_lookup(g, lat, lon);
+            ag[yi * cols + xi] = av;
+        }
+    }
+    for (int yi = 0; yi < OVERLAY_MERC_NY; yi++) {
+        float y0 = -hh + yi * dy, y1 = y0 + dy;
+        for (int xi = 0; xi < OVERLAY_MERC_NX; xi++) {
+            float x0 = -hw + xi * dx, x1 = x0 + dx;
+            float a00 = ag[yi*cols+xi], a10 = ag[yi*cols+xi+1];
+            float a01 = ag[(yi+1)*cols+xi], a11 = ag[(yi+1)*cols+xi+1];
+            if (a00 == 0.0f && a10 == 0.0f && a01 == 0.0f && a11 == 0.0f) continue;
+            aurora_emit(m, x0, y0, a00); aurora_emit(m, x1, y0, a10); aurora_emit(m, x1, y1, a11);
+            aurora_emit(m, x0, y0, a00); aurora_emit(m, x1, y1, a11); aurora_emit(m, x0, y1, a01);
+        }
+    }
+    free(ag);
+}
+
 void aurora_mesh_build(AuroraMesh *m, const AuroraGrid *g)
 {
     if (!g || !g->valid || !m->vertices) return;
+
+    if (projection_get_mode() == PROJ_MERCATOR) {
+        aurora_mesh_build_mercator(m, g);
+        return;
+    }
 
     double max_r = projection_get_radius() - 0.5;
     float dr = (float)(max_r / AURORA_RADIAL_DIVS);
@@ -1115,9 +1160,50 @@ static float drap_lookup(const DrapGrid *g, double lat, double lon)
     return 0.45f + (val - 10.0f) / 20.0f * 0.25f;
 }
 
+static void drap_mesh_build_mercator(AuroraMesh *m, const DrapGrid *g)
+{
+    float hw = (float)(M_PI * EARTH_RADIUS_KM);
+    float hh = (float)projection_mercator_ymax();
+    float dx = 2.0f * hw / OVERLAY_MERC_NX;
+    float dy = 2.0f * hh / OVERLAY_MERC_NY;
+    int cols = OVERLAY_MERC_NX + 1, rows = OVERLAY_MERC_NY + 1;
+    float *ag = malloc(rows * cols * sizeof(float));
+    if (!ag) return;
+
+    m->vertex_count = 0;
+    for (int yi = 0; yi <= OVERLAY_MERC_NY; yi++) {
+        float y = -hh + yi * dy;
+        for (int xi = 0; xi <= OVERLAY_MERC_NX; xi++) {
+            float x = -hw + xi * dx;
+            double lat, lon;
+            float av = 0.0f;
+            if (projection_inverse((double)x, (double)y, &lat, &lon) == 0)
+                av = drap_lookup(g, lat, lon);
+            ag[yi * cols + xi] = av;
+        }
+    }
+    for (int yi = 0; yi < OVERLAY_MERC_NY; yi++) {
+        float y0 = -hh + yi * dy, y1 = y0 + dy;
+        for (int xi = 0; xi < OVERLAY_MERC_NX; xi++) {
+            float x0 = -hw + xi * dx, x1 = x0 + dx;
+            float a00 = ag[yi*cols+xi], a10 = ag[yi*cols+xi+1];
+            float a01 = ag[(yi+1)*cols+xi], a11 = ag[(yi+1)*cols+xi+1];
+            if (a00 == 0.0f && a10 == 0.0f && a01 == 0.0f && a11 == 0.0f) continue;
+            aurora_emit(m, x0, y0, a00); aurora_emit(m, x1, y0, a10); aurora_emit(m, x1, y1, a11);
+            aurora_emit(m, x0, y0, a00); aurora_emit(m, x1, y1, a11); aurora_emit(m, x0, y1, a01);
+        }
+    }
+    free(ag);
+}
+
 void drap_mesh_build(AuroraMesh *m, const DrapGrid *g)
 {
     if (!g || !g->valid || !m->vertices) return;
+
+    if (projection_get_mode() == PROJ_MERCATOR) {
+        drap_mesh_build_mercator(m, g);
+        return;
+    }
 
     #define DRAP_ANGULAR_DIVS  180
     #define DRAP_RADIAL_DIVS    60

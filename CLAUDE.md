@@ -8,7 +8,7 @@ Do not add Co-Authored-By lines to commit messages.
 
 ## Project Overview
 
-azMapGTK is a GTK4 port of azMap — an interactive azimuthal/orthographic map projection application for amateur radio operators. The globe is rendered via OpenGL in a GtkGLArea widget; the sidebar uses native GTK4 widgets instead of hand-drawn OpenGL UI.
+azMapGTK is a GTK4 port of azMap — an interactive azimuthal/orthographic/Mercator map projection application for amateur radio operators. The globe is rendered via OpenGL in a GtkGLArea widget; the sidebar uses native GTK4 widgets instead of hand-drawn OpenGL UI.
 
 ## Build
 
@@ -54,7 +54,7 @@ The app uses a single GLSL shader program (`shaders/map.vert` + `shaders/map.fra
 1. **km-space** — map geometry projected via `camera.c` MVP matrix. Layers drawn back-to-front: earth disc (stencil-filled land) → grid → distance circles → night overlay → aurora/DRAP → borders → coastlines → MUF/SporE contours → great circle line → markers → north pole.
 2. **pixel-space** — labels rendered with a simple orthographic matrix after the map layers. Uses `text.c` vector stroke font (GL_LINES).
 
-Land fill uses the **stencil buffer**: disc marks stencil bit 7, land polygons invert bits 0-6 (odd-even rule), then a fullscreen quad draws where stencil < 0x80.
+Land fill uses the **stencil buffer**: disc marks stencil bit 7, land polygons invert bits 0-6 (odd-even rule), then a fullscreen quad draws where stencil > 0x80. Mercator uses per-ring longitude wrapping (no clipping) to avoid self-intersecting shortcut edges at the antimeridian.
 
 ### Data Flow
 
@@ -67,7 +67,7 @@ Land fill uses the **stencil buffer**: disc marks stencil bit 7, land polygons i
 ### Module Boundaries
 
 Core modules (shared with original azMap, do not depend on GTK):
-- `projection.c` — forward/inverse azimuthal equidistant + orthographic projections (lat/lon ↔ km-space)
+- `projection.c` — forward/inverse azimuthal equidistant, orthographic + Mercator projections (lat/lon ↔ km-space)
 - `map_data.c` — loads `.shp` files via shapelib, stores projected vertices in segmented arrays (`segment_starts[]`/`segment_counts[]`); supports appending multiple shapefiles via `map_data_load_append()`
 - `grid.c` — generates graticule lines + distance circles as MapData segments
 - `solar.c` — subsolar point from UTC
@@ -92,14 +92,14 @@ The sidebar (`SIDEBAR_WIDTH` = 260px) is a vertical GtkBox with sections separat
 - **Propagation indices** — Kp/Bz, SFU/SSN, X-ray flare class, NOAA scales, DRAP peak, solar wind speed, and CH HSS status (always visible, fetched independently of overlay toggles)
 - **Legends** — color-coded E's (foEs MHz), MUF (MHz), and DRAP level legends; rebuilt dynamically via `rebuild_legends()` when overlay data arrives
 - **SOURCE** — QRZ callsign lookup toggle button (highlights when station info originates from QRZ; auto-deactivates when another source updates station info)
-- **LAYERS** — toggle buttons for Aurora, E's, MUF, DRAP overlays
-- **MAP** — ORTHO/HOME buttons (projection toggle + view reset)
+- **LAYERS** — toggle buttons for Aurora, E's, MUF, DRAP overlays + Beacons (NCDXF/IARU)
+- **MAP** — PROJ button (cycles AZEQ → ORTHO → MERC) with mode label underneath, HOME button (reset view)
 
 Button groups (SOURCE, LAYERS, MAP) use half-sidebar-width centered containers. Separators use CSS classes: `.btn-sep` (white) between button groups, `.info-sep` (light grey) between info sections. Legend colors are applied via a dynamically rebuilt `GtkCssProvider` with per-label CSS classes (`lc0`, `lc1`, ...).
 
 ### Key Patterns
 
 - All geometry uses the `MapData` struct with parallel arrays: `vertices[]` (interleaved x,y floats), `segment_starts[]`, `segment_counts[]`. Upload functions copy these into GPU buffers.
-- Projection changes require full vertex recalculation: `map_data_project()` → `renderer_upload_*()` for every layer. Switching back to azimuthal mode also resets the camera view and rebuilds the night overlay immediately.
+- Projection changes require full vertex recalculation: `map_data_project()` → `renderer_upload_*()` for every layer. Switching modes resets camera zoom to fit the earth, and rebuilds the night overlay immediately. Three modes: AZEQ (azimuthal equidistant), ORTHO (orthographic), MERC (Mercator).
 - Overlays (MUF, Aurora, etc.) are fetched asynchronously. `fetch.c` runs curl in a background thread; completion callbacks run on the main thread via `g_idle_add()` and update overlay state + re-upload. Kp/Bz, SFU/SSN, DRAP, solar wind speed, and CH HSS data are fetched unconditionally (not gated on overlay toggle).
 - The renderer uses epoxy (not GLEW) for GL function loading, matching GTK4's requirements.
