@@ -66,6 +66,10 @@ package() {
     cp -r "$srcdir/data/." "$pkgdir/usr/share/$pkgname/data/"
 
     install -Dm644 "$_srcroot/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-    install -Dm644 "$_srcroot/README.md" -t "$pkgdir/usr/share/doc/$pkgname"
-    install -Dm644 "$_srcroot/USER_GUIDE.md" -t "$pkgdir/usr/share/doc/$pkgname"
+
+    # Every document the installed README links to, so its relative links resolve.
+    local doc
+    for doc in README.md INSTALL.md USER_GUIDE.md DEV_GUIDE.md CHANGELOG.md; do
+        install -Dm644 "$_srcroot/$doc" -t "$pkgdir/usr/share/doc/$pkgname"
+    done
 }

@@ -68,7 +68,7 @@ Installed files:
 | `/usr/share/azmap-gtk/shaders/` | `map.vert`, `map.frag` |
 | `/usr/share/azmap-gtk/data/` | Natural Earth 110m shapefiles (read-only master copy) |
 | `/usr/share/applications/azmap-gtk.desktop` | Desktop entry |
-| `/usr/share/doc/azmap-gtk/` | README and user guide |
+| `/usr/share/doc/azmap-gtk/` | README, install, user, and developer guides, changelog |
 | `/usr/share/licenses/azmap-gtk/LICENSE` | GPL-2.0-or-later |
 
 Uninstall with `sudo pacman -R azmap-gtk`. Files created under your home
