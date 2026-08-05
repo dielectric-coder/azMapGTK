@@ -55,6 +55,10 @@ typedef struct {
     char   data_dir[1024];    /* from config: data_dir = /path/to/shapefiles */
 } Config;
 
+/* Create ~/.config/azmap.conf with built-in defaults if it does not exist yet.
+ * Returns 1 if a file was created, 0 if one was already there, -1 on error. */
+int config_ensure_default(void);
+
 /* Load config from ~/.config/azmap.conf. Returns 0 on success, -1 if not found/error. */
 int config_load(Config *cfg);
 

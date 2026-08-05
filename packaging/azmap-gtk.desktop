@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=azMap-GTK
+GenericName=Azimuthal Map
+Comment=Azimuthal, orthographic and Mercator maps for amateur radio
+Exec=azmap-gtk
+Terminal=false
+Categories=Education;Science;Network;HamRadio;
+Keywords=amateur radio;ham;propagation;azimuthal;great circle;beacon;DX;
+StartupNotify=true

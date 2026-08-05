@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -78,6 +79,78 @@ static void get_config_path(char *out, size_t sz)
         snprintf(out, sz, "%s/.config/azmap.conf", home);
     else
         out[0] = '\0';
+}
+
+/* Expand a leading "~/" to $HOME; anything else is copied verbatim. */
+static void expand_tilde(const char *in, char *out, size_t sz)
+{
+    const char *home = getenv("HOME");
+    if (in[0] == '~' && (in[1] == '/' || in[1] == '\0') && home)
+        snprintf(out, sz, "%s%s", home, in + 1);
+    else
+        snprintf(out, sz, "%s", in);
+}
+
+/* Written verbatim on first run.  Session state (target, view, window) is
+ * appended later by config_save_state(). */
+static const char *DEFAULT_CONFIG =
+    "# azMap-GTK configuration\n"
+    "\n"
+    "# Your station: callsign and QTH coordinates in decimal degrees\n"
+    "# (positive lat = north, positive lon = east).\n"
+    "name=NOCALL\n"
+    "lat=0.0\n"
+    "lon=90.0\n"
+    "\n"
+    "# QRZ.com XML API credentials; leave empty to disable callsign lookup.\n"
+    "qrz_user=\n"
+    "qrz_pass=\n"
+    "\n"
+    "# Directory searched for Natural Earth shapefiles.  Layers may sit\n"
+    "# directly in it or one subdirectory deep.  Populated on first run from\n"
+    "# the shapefiles shipped with the installation.\n"
+    "data_dir=~/.local/azmap/data\n"
+    "\n"
+    "# Target and view state are written back here automatically on exit.\n";
+
+int config_ensure_default(void)
+{
+    char path[1024];
+    get_config_path(path, sizeof(path));
+    if (!path[0]) return -1;
+
+    if (access(path, F_OK) == 0) return 0;
+
+    /* Make sure ~/.config exists before writing into it. */
+    char dir[1024];
+    snprintf(dir, sizeof(dir), "%s", path);
+    char *slash = strrchr(dir, '/');
+    if (slash) {
+        *slash = '\0';
+        if (mkdir(dir, 0700) != 0 && errno != EEXIST) {
+            fprintf(stderr, "Warning: cannot create %s: %s\n", dir, strerror(errno));
+            return -1;
+        }
+    }
+
+    /* 0600: the file holds QRZ credentials once the user fills them in. */
+    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (fd < 0) {
+        if (errno == EEXIST) return 0;   /* raced with another instance */
+        fprintf(stderr, "Warning: cannot create %s: %s\n", path, strerror(errno));
+        return -1;
+    }
+
+    size_t len = strlen(DEFAULT_CONFIG);
+    ssize_t n = write(fd, DEFAULT_CONFIG, len);
+    close(fd);
+    if (n < 0 || (size_t)n != len) {
+        fprintf(stderr, "Warning: failed to write %s\n", path);
+        return -1;
+    }
+
+    fprintf(stderr, "Created default configuration: %s\n", path);
+    return 1;
 }
 
 int config_load(Config *cfg)
@@ -169,8 +242,7 @@ int config_load(Config *cfg)
         } else if (strcmp(key, "panel_visible") == 0) {
             cfg->panel_visible = (int)strtol(val, NULL, 10);
         } else if (strcmp(key, "data_dir") == 0) {
-            strncpy(cfg->data_dir, val, sizeof(cfg->data_dir) - 1);
-            cfg->data_dir[sizeof(cfg->data_dir) - 1] = '\0';
+            expand_tilde(val, cfg->data_dir, sizeof(cfg->data_dir));
         }
     }
 

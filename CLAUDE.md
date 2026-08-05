@@ -32,8 +32,18 @@ Install targets (via GNUInstallDirs):
 - Binary: `${bindir}/azmap-gtk`
 - Shaders: `${datadir}/azmap-gtk/shaders/`
 - Map data: `${datadir}/azmap-gtk/data/` (optional, .shp/.shx/.dbf/.prj only)
+- Desktop entry: `${datadir}/applications/azmap-gtk.desktop`
+
+Arch packaging lives in `packaging/arch/PKGBUILD`; it builds the working tree
+(`$startdir/../..`, override with `AZMAP_SRCROOT`) and downloads the Natural
+Earth archives as checksummed sources. Rebuild and reinstall with
+`cd packaging/arch && makepkg -f && sudo pacman -U azmap-gtk-*.pkg.tar.zst`.
 
 There are no tests or linters configured. The project compiles with `-Wall -Wextra`.
+
+Docs: `INSTALL.md` (install/build), `USER_GUIDE.md` (runtime), `DEV_GUIDE.md`
+(architecture, gotchas), `CHANGELOG.md`. `CHANGES_SUMMARY.md` is a historical
+snapshot of one review pass — do not update it.
 
 ## Run
 
@@ -103,3 +113,6 @@ Button groups (SOURCE, LAYERS, MAP) use half-sidebar-width centered containers. 
 - Projection changes require full vertex recalculation: `map_data_project()` → `renderer_upload_*()` for every layer. Switching modes resets camera zoom to fit the earth, and rebuilds the night overlay immediately. Three modes: AZEQ (azimuthal equidistant), ORTHO (orthographic), MERC (Mercator).
 - Overlays (MUF, Aurora, etc.) are fetched asynchronously. `fetch.c` runs curl in a background thread; completion callbacks run on the main thread via `g_idle_add()` and update overlay state + re-upload. Kp/Bz, SFU/SSN, DRAP, solar wind speed, and CH HSS data are fetched unconditionally (not gated on overlay toggle).
 - The renderer uses epoxy (not GLEW) for GL function loading, matching GTK4's requirements.
+- `config_ensure_default()` writes `~/.config/azmap.conf` (mode 0600) with built-in defaults on first run, before `config_load()`. Existing files are never overwritten. `data_dir` gets `~/` expansion; no other key does.
+- Shapefile discovery (`find_shp_in_dir()`) searches `dir/` and `dir/*/`, and takes a `reject` substring. The land lookup **must** pass `"boundary"` — `*_land.shp` also matches `ne_110m_admin_0_boundary_lines_land.shp`, which sorts first under `glob`, and stencil-filling those polylines draws large grey wedges over the map.
+- On first run, an empty `data_dir` is seeded from the installed copy at `<prefix>/share/azmap-gtk/data` (`seed_data_dir()`, one level deep).

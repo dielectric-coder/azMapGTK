@@ -1,0 +1,71 @@
+# Maintainer: Michel Lachaine <michel.lachaine@pm.me>
+#
+# Builds the working tree this PKGBUILD lives in (../.. from here), so run
+# makepkg from packaging/arch inside the checkout:
+#
+#     cd packaging/arch && makepkg -si
+#
+# Override the tree with:  AZMAP_SRCROOT=/path/to/azMapGTK makepkg -si
+
+pkgname=azmap-gtk
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Azimuthal, orthographic and Mercator map projections for amateur radio (GTK4/OpenGL)"
+arch=('x86_64')
+url="https://github.com/dielectric-coder/azMapGTK"
+license=('GPL-2.0-or-later')
+depends=('gtk4' 'libepoxy' 'shapelib' 'curl' 'libglvnd')
+makedepends=('cmake')
+
+# Natural Earth 110m vectors (public domain).  Installed under /usr/share;
+# the app copies them into ~/.local/azmap/data on first run.
+_ne_base="https://naciscdn.org/naturalearth/110m"
+source=("$_ne_base/physical/ne_110m_coastline.zip"
+        "$_ne_base/physical/ne_110m_land.zip"
+        "$_ne_base/cultural/ne_110m_admin_0_boundary_lines_land.zip")
+noextract=("${source[@]##*/}")
+sha256sums=('664449b39070027e882abb295974d182afec18ca21107273d17e9e8bf6f64817'
+            '1926c621afd6ac67c3f36639bb1236134a48d82226dc675d3e3df53d02d2a3de'
+            'bb2954981570498a4b4344f8e83fa54caa5858e15e800094112407d2bd2f940d')
+
+_srcroot="${AZMAP_SRCROOT:-$(cd "$startdir/../.." && pwd)}"
+
+prepare() {
+    [ -f "$_srcroot/CMakeLists.txt" ] || {
+        error "no azMapGTK source tree at %s" "$_srcroot"
+        return 1
+    }
+
+    # One directory per layer, matching the layout the app falls back to
+    # when no data_dir is configured.
+    local zip layer
+    for zip in "${noextract[@]}"; do
+        layer="${zip%.zip}"
+        mkdir -p "$srcdir/data/$layer"
+        bsdtar -xf "$srcdir/$zip" -C "$srcdir/data/$layer"
+    done
+
+    # Drop the README/VERSION files the archives carry alongside the data.
+    find "$srcdir/data" -type f \
+        ! -name '*.shp' ! -name '*.shx' ! -name '*.dbf' \
+        ! -name '*.prj' ! -name '*.cpg' -delete
+}
+
+build() {
+    cmake -S "$_srcroot" -B build \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -Wno-dev
+    cmake --build build
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+
+    install -d "$pkgdir/usr/share/$pkgname/data"
+    cp -r "$srcdir/data/." "$pkgdir/usr/share/$pkgname/data/"
+
+    install -Dm644 "$_srcroot/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 "$_srcroot/README.md" -t "$pkgdir/usr/share/doc/$pkgname"
+    install -Dm644 "$_srcroot/USER_GUIDE.md" -t "$pkgdir/usr/share/doc/$pkgname"
+}

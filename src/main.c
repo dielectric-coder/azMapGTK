@@ -31,6 +31,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <glob.h>
 #include <locale.h>
 #include <math.h>
@@ -232,21 +233,126 @@ static void resolve_path(const char *exe, const char *rel, char *out, size_t out
     }
 }
 
-/* Find first .shp in dir matching a glob pattern, e.g. "*coastline*.shp" */
-static int find_shp_in_dir(const char *dir, const char *pattern, char *out, size_t out_size)
+/* First path matching a glob and not containing the `reject` substring
+ * (NULL to accept anything), or -1 if nothing matches. */
+static int glob_first(const char *glob_pat, const char *reject,
+                      char *out, size_t out_size)
+{
+    glob_t g = {0};
+    int rc = -1;
+    if (glob(glob_pat, 0, NULL, &g) == 0) {
+        for (size_t i = 0; i < g.gl_pathc; i++) {
+            if (reject && strstr(g.gl_pathv[i], reject)) continue;
+            strncpy(out, g.gl_pathv[i], out_size - 1);
+            out[out_size - 1] = '\0';
+            rc = 0;
+            break;
+        }
+    }
+    globfree(&g);
+    return rc;
+}
+
+/* Find first .shp matching a glob pattern, e.g. "*coastline*.shp", either
+ * directly in dir or one subdirectory deep — Natural Earth ships each layer
+ * in its own folder, so both layouts are common.  Paths containing `reject`
+ * are skipped: "*_land.shp" would otherwise also match the country-border
+ * polylines in ne_110m_admin_0_boundary_lines_land, and those sort first. */
+static int find_shp_in_dir_quiet(const char *dir, const char *pattern,
+                                 const char *reject, char *out, size_t out_size)
 {
     char glob_pat[PATH_MAX];
     snprintf(glob_pat, sizeof(glob_pat), "%s/%s", dir, pattern);
-    glob_t g = {0};
-    if (glob(glob_pat, 0, NULL, &g) == 0 && g.gl_pathc > 0) {
-        strncpy(out, g.gl_pathv[0], out_size - 1);
-        out[out_size - 1] = '\0';
-        globfree(&g);
+    if (glob_first(glob_pat, reject, out, out_size) == 0) return 0;
+    snprintf(glob_pat, sizeof(glob_pat), "%s/*/%s", dir, pattern);
+    if (glob_first(glob_pat, reject, out, out_size) == 0) return 0;
+    return -1;
+}
+
+static int find_shp_in_dir(const char *dir, const char *pattern,
+                           const char *reject, char *out, size_t out_size)
+{
+    if (find_shp_in_dir_quiet(dir, pattern, reject, out, out_size) == 0)
         return 0;
-    }
-    globfree(&g);
     fprintf(stderr, "Warning: no %s found in %s\n", pattern, dir);
     return -1;
+}
+
+/* mkdir -p for a single path, creating every missing parent. */
+static int mkdir_p(const char *path, mode_t mode)
+{
+    char buf[PATH_MAX];
+    snprintf(buf, sizeof(buf), "%s", path);
+    for (char *p = buf + 1; *p; p++) {
+        if (*p != '/') continue;
+        *p = '\0';
+        if (mkdir(buf, mode) != 0 && errno != EEXIST) return -1;
+        *p = '/';
+    }
+    return (mkdir(buf, mode) == 0 || errno == EEXIST) ? 0 : -1;
+}
+
+static int copy_file(const char *src, const char *dst)
+{
+    FILE *in = fopen(src, "rb");
+    if (!in) return -1;
+    FILE *out = fopen(dst, "wb");
+    if (!out) { fclose(in); return -1; }
+
+    char buf[64 * 1024];
+    size_t n;
+    int rc = 0;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) { rc = -1; break; }
+    }
+    if (ferror(in)) rc = -1;
+    if (fclose(out) != 0) rc = -1;
+    fclose(in);
+    if (rc != 0) unlink(dst);
+    return rc;
+}
+
+/* Copy the shapefile components of src into dst, descending one level so the
+ * per-layer subdirectories are preserved.  Used to populate the user's
+ * data_dir on first run from the read-only copy shipped with the install. */
+static int seed_data_dir(const char *src, const char *dst, int depth)
+{
+    static const char *exts[] = { ".shp", ".shx", ".dbf", ".prj", ".cpg", NULL };
+
+    DIR *d = opendir(src);
+    if (!d) return -1;
+    if (mkdir_p(dst, 0755) != 0) { closedir(d); return -1; }
+
+    int copied = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.') continue;
+
+        char src_path[PATH_MAX], dst_path[PATH_MAX];
+        snprintf(src_path, sizeof(src_path), "%s/%s", src, e->d_name);
+        snprintf(dst_path, sizeof(dst_path), "%s/%s", dst, e->d_name);
+
+        struct stat st;
+        if (stat(src_path, &st) != 0) continue;
+
+        if (S_ISDIR(st.st_mode)) {
+            if (depth > 0 && seed_data_dir(src_path, dst_path, depth - 1) > 0)
+                copied++;
+            continue;
+        }
+        if (!S_ISREG(st.st_mode)) continue;
+
+        const char *dot = strrchr(e->d_name, '.');
+        if (!dot) continue;
+        for (int i = 0; exts[i]; i++) {
+            if (strcmp(dot, exts[i]) != 0) continue;
+            if (access(dst_path, F_OK) != 0 && copy_file(src_path, dst_path) == 0)
+                copied++;
+            break;
+        }
+    }
+    closedir(d);
+    return copied;
 }
 
 static int format_coord(char *buf, size_t sz, double lat, double lon)
@@ -2089,8 +2195,10 @@ int main(int argc, char **argv)
     /* Initialize libcurl globally before any threads start */
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
-    /* Load config */
+    /* Load config, writing out the built-in defaults on first run so that a
+     * fresh install starts without command line coordinates */
     Config cfg;
+    config_ensure_default();
     int has_config = (config_load(&cfg) == 0 && cfg.valid);
 
     double center_lat, center_lon, target_lat, target_lon;
@@ -2198,11 +2306,32 @@ int main(int argc, char **argv)
     /* If data_dir is set in config, try it first for shapefiles */
     if (cfg.data_dir[0]) {
         char try_shp[PATH_MAX] = "", try_border[PATH_MAX] = "", try_land[PATH_MAX] = "";
-        int found_coast = (find_shp_in_dir(cfg.data_dir, "*coastline*.shp",
+
+        /* First run after an install: the configured data_dir lives under the
+         * user's home and is still empty.  Seed it from the read-only copy
+         * shipped with the package so the map has something to draw. */
+        if (find_shp_in_dir_quiet(cfg.data_dir, "*coastline*.shp", NULL,
+                                  try_shp, sizeof(try_shp)) != 0) {
+            char sys_data[PATH_MAX], probe[PATH_MAX];
+            resolve_path(exe_path, "data", sys_data, sizeof(sys_data));
+            if (strcmp(sys_data, cfg.data_dir) != 0 &&
+                find_shp_in_dir_quiet(sys_data, "*coastline*.shp", NULL,
+                                      probe, sizeof(probe)) == 0) {
+                int n = seed_data_dir(sys_data, cfg.data_dir, 1);
+                if (n > 0)
+                    fprintf(stderr, "Populated %s from %s\n", cfg.data_dir, sys_data);
+                else if (n < 0)
+                    fprintf(stderr, "Warning: could not populate %s: %s\n",
+                            cfg.data_dir, strerror(errno));
+            }
+            try_shp[0] = '\0';
+        }
+
+        int found_coast = (find_shp_in_dir(cfg.data_dir, "*coastline*.shp", NULL,
                            try_shp, sizeof(try_shp)) == 0);
-        find_shp_in_dir(cfg.data_dir, "*boundary*land*.shp",
+        find_shp_in_dir(cfg.data_dir, "*boundary*land*.shp", NULL,
                         try_border, sizeof(try_border));
-        find_shp_in_dir(cfg.data_dir, "*_land.shp",
+        find_shp_in_dir(cfg.data_dir, "*_land.shp", "boundary",
                         try_land, sizeof(try_land));
         if (found_coast) {
             strncpy(default_shp, try_shp, PATH_MAX - 1);
@@ -2237,11 +2366,11 @@ int main(int argc, char **argv)
         for (int i = 0; i < num_shp_overrides; i++) {
             struct stat st;
             if (stat(shp_overrides[i], &st) == 0 && S_ISDIR(st.st_mode)) {
-                find_shp_in_dir(shp_overrides[i], "*coastline*.shp",
+                find_shp_in_dir(shp_overrides[i], "*coastline*.shp", NULL,
                                 shp_paths[num_shp_paths].coast, PATH_MAX);
-                find_shp_in_dir(shp_overrides[i], "*boundary*land*.shp",
+                find_shp_in_dir(shp_overrides[i], "*boundary*land*.shp", NULL,
                                 shp_paths[num_shp_paths].border, PATH_MAX);
-                find_shp_in_dir(shp_overrides[i], "*_land.shp",
+                find_shp_in_dir(shp_overrides[i], "*_land.shp", "boundary",
                                 shp_paths[num_shp_paths].land, PATH_MAX);
                 num_shp_paths++;
             } else {

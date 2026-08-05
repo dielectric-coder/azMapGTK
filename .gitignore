@@ -2,3 +2,9 @@ build/
 data/
 *.o
 *.d
+
+# makepkg working directories and output
+packaging/arch/src/
+packaging/arch/pkg/
+packaging/arch/*.pkg.tar.*
+packaging/arch/*.zip

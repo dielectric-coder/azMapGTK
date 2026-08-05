@@ -4,6 +4,15 @@ GTK4 port of [azMap](https://github.com/mikelisfbay/azMap) — an interactive az
 
 ![azMapGTK screenshot](doc/screenshot.png)
 
+## Documentation
+
+| Document | Contents |
+|----------|----------|
+| [INSTALL.md](INSTALL.md) | Dependencies, Arch package, building, first run, map data |
+| [USER_GUIDE.md](USER_GUIDE.md) | Controls, sidebar, projections, beacons, config reference |
+| [DEV_GUIDE.md](DEV_GUIDE.md) | Architecture, rendering pipeline, module boundaries, gotchas |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
+
 ## Features
 
 - Azimuthal equidistant, orthographic, and Mercator projection modes
@@ -51,6 +60,18 @@ cmake -DCMAKE_INSTALL_PREFIX=/usr ..
 sudo cmake --install .
 ```
 
+### Arch package
+
+`packaging/arch/PKGBUILD` builds the current checkout and downloads the Natural
+Earth data itself:
+
+```bash
+cd packaging/arch && makepkg -si
+```
+
+The package installs the binary, shaders, a desktop entry, and a read-only copy
+of the map data under `/usr/share/azmap-gtk/data`.
+
 ## Map Data
 
 Download [Natural Earth 110m](https://www.naturalearthdata.com/downloads/110m-physical-vectors/) shapefiles into `data/`:
@@ -86,7 +107,8 @@ Or symlink from an existing azMap installation: `ln -s ../azMap/data data`
 
 ### Config File
 
-Optional. Place at `~/.config/azmap.conf`:
+`~/.config/azmap.conf` is created with defaults (`NOCALL` at 0°N 90°E) on first
+run if it does not exist, then edited to taste:
 
 ```
 name = MyQTH
@@ -94,7 +116,13 @@ lat = 40.4168
 lon = -3.7038
 qrz_user = YOURCALL
 qrz_pass = yourpassword
+data_dir = ~/.local/azmap/data
 ```
+
+`data_dir` is where shapefiles are looked up — either directly in it or one
+subdirectory deep. It is populated on first run from the copy shipped with the
+installation, so a packaged install works without downloading anything. Target
+and view state are appended to this file automatically on exit.
 
 ## Controls
 

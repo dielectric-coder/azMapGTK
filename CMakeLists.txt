@@ -99,6 +99,7 @@ add_dependencies(azmap-gtk copy_shaders)
 include(GNUInstallDirs)
 install(TARGETS azmap-gtk RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(DIRECTORY shaders/ DESTINATION ${CMAKE_INSTALL_DATADIR}/azmap-gtk/shaders)
+install(FILES packaging/azmap-gtk.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(DIRECTORY data/ DESTINATION ${CMAKE_INSTALL_DATADIR}/azmap-gtk/data
     OPTIONAL
     FILES_MATCHING

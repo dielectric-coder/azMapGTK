@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.2.0 — 2026-08-05
+
+### Added
+
+- NCDXF/IARU beacon layer — 18 beacons on the 3-minute network cycle, per-band color coding, pulsing radius animation for the active beacon, sidebar callsign/countdown and band legend
+- Mercator projection mode, with per-ring longitude wrapping to avoid antimeridian artifacts; PROJ button now cycles AZEQ → ORTHO → MERC
+- Default configuration written to `~/.config/azmap.conf` (mode 0600) on first run: `NOCALL` at 0°N 90°E, empty QRZ credentials, `data_dir=~/.local/azmap/data`
+- `data_dir` is populated automatically on first run from the shapefiles shipped with the installation
+- Tilde expansion for `data_dir`
+- Shapefile discovery now searches one subdirectory deep, matching the per-layer folder layout Natural Earth archives unpack into
+- Arch `PKGBUILD` under `packaging/arch/`, building the working tree and fetching the Natural Earth data with pinned checksums
+- Desktop entry, installed to `${datadir}/applications`
+- `INSTALL.md` and `DEV_GUIDE.md`
+
+### Fixed
+
+- Land layer could resolve to the country-border polylines: `*_land.shp` also matches `ne_110m_admin_0_boundary_lines_land.shp`, which sorts first, and stencil-filling those open lines drew large grey wedges over the map. The land lookup now rejects paths containing `boundary`
+- A fresh install no longer printed usage and exited when launched with no arguments — there is now always a config with coordinates to fall back on
+
+### Documentation
+
+- User guide updated for Mercator, beacons, the TARGET and DATA buttons, the new config keys, and shapefile search order
+
 ## v0.1.4 — 2026-03-17
 
 ### Added
