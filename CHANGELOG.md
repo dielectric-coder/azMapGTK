@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.2.3 — 2026-09-16
+
+### Fixed
+
+- Kp, Bz, SFU and solar wind speed stopped updating: SWPC reshaped its JSON
+  products. The `products/summary/` feeds went from a bare object with
+  CamelCase string fields to a one-element array of objects with snake_case
+  numeric fields (`Bz` → `bz_gsm`, `Flux` → `flux`, `WindSpeed` →
+  `proton_speed`, `TimeStamp` → `time_tag`), and `noaa-planetary-k-index.json`
+  went from an array of arrays with a header row to an array of objects. The
+  parsers now read either shape. Bz and SFU had been failing *silently*,
+  reporting success while leaving the value at zero
+- SSN age always showed `--`. `parse_utc_timestamp()` matched the discussion
+  `"2026 Mar 14 1230 UTC"` form against the daily-solar-indices line
+  `"2026 09 15  107  23"` (`%3s` accepts `"09"`), then returned 0 on the failed
+  month-name lookup instead of falling through to the numeric date form
+- E's age was reported as months old. The timestamp came from the first entry
+  of the station feed, which is not ordered by time and routinely holds a
+  station that has stopped reporting; it is now the newest sounding in the feed
+
 ## v0.2.2 — 2026-09-16
 
 ### Added

@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <ctype.h>
 #include <math.h>
 #include "overlay.h"
 #include "projection.h"
@@ -68,7 +69,11 @@ static time_t parse_utc_timestamp(const char *s)
     {
         char mon[4] = {0};
         int hhmm;
-        if (sscanf(s, "%d %3s %d %d", &tm.tm_year, mon, &tm.tm_mday, &hhmm) == 4) {
+        /* The month must be a name here: "2026 09 15  107  23" from
+         * daily-solar-indices also matches %d %3s %d %d, so an all-digit
+         * token has to fall through to the numeric date form below. */
+        if (sscanf(s, "%d %3s %d %d", &tm.tm_year, mon, &tm.tm_mday, &hhmm) == 4 &&
+            isalpha((unsigned char)mon[0])) {
             static const char *months[] = {
                 "Jan","Feb","Mar","Apr","May","Jun",
                 "Jul","Aug","Sep","Oct","Nov","Dec"
@@ -77,11 +82,12 @@ static time_t parse_utc_timestamp(const char *s)
             for (int i = 0; i < 12; i++) {
                 if (strncasecmp(mon, months[i], 3) == 0) { tm.tm_mon = i; break; }
             }
-            if (tm.tm_mon < 0) return 0;
-            tm.tm_year -= 1900;
-            tm.tm_hour = hhmm / 100;
-            tm.tm_min = hhmm % 100;
-            return timegm(&tm);
+            if (tm.tm_mon >= 0) {
+                tm.tm_year -= 1900;
+                tm.tm_hour = hhmm / 100;
+                tm.tm_min = hhmm % 100;
+                return timegm(&tm);
+            }
         }
     }
     /* Try "YYYY MM DD" (daily solar indices) */
@@ -92,6 +98,53 @@ static time_t parse_utc_timestamp(const char *s)
     }
     return 0;
 }
+
+/* ── SWPC JSON field helpers ──────────────────────── */
+
+/* SWPC reshaped the JSON products: the summary endpoints went from a
+ * bare object with CamelCase string fields to a one-element array of objects
+ * with snake_case numeric fields, and noaa-planetary-k-index.json went from an
+ * array of arrays with a header row to an array of objects. The helpers below
+ * read either shape, so the parsers keep working if the format shifts back. */
+
+/* Object at hand: the object itself, or the last element of an array. */
+static cJSON *json_last_object(cJSON *root)
+{
+    if (!cJSON_IsArray(root))
+        return cJSON_IsObject(root) ? root : NULL;
+    int n = cJSON_GetArraySize(root);
+    return n > 0 ? cJSON_GetArrayItem(root, n - 1) : NULL;
+}
+
+/* Read a number from the first key present, as JSON number or numeric string.
+ * Returns 1 on success; *out is untouched otherwise. Callers must use the
+ * return value rather than testing *out, since 0 is a valid Bz. */
+static int json_number(const cJSON *obj, const char *const *keys, int nkeys,
+                       double *out)
+{
+    for (int i = 0; i < nkeys; i++) {
+        cJSON *v = cJSON_GetObjectItem(obj, keys[i]);
+        if (!v) continue;
+        if (cJSON_IsNumber(v)) { *out = v->valuedouble; return 1; }
+        if (cJSON_IsString(v) && v->valuestring) {
+            *out = atof(v->valuestring);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Timestamp from the first key present; 0 if none parse. */
+static time_t json_time(const cJSON *obj, const char *const *keys, int nkeys)
+{
+    for (int i = 0; i < nkeys; i++) {
+        cJSON *v = cJSON_GetObjectItem(obj, keys[i]);
+        if (v && cJSON_IsString(v))
+            return parse_utc_timestamp(v->valuestring);
+    }
+    return 0;
+}
+
 
 /* ── MUF contour lines ─────────────────────────────────────────── */
 
@@ -420,12 +473,19 @@ int spore_parse_json(const char *json_str, MufData *m)
     float sta_foes[SPORE_MAX_STATIONS];
     int nsta = 0;
 
-    /* Extract timestamp from first station entry */
-    cJSON *first = cJSON_GetArrayItem(root, 0);
-    if (first) {
-        cJSON *t = cJSON_GetObjectItem(first, "time");
-        if (t && cJSON_IsString(t))
-            m->ts = parse_utc_timestamp(t->valuestring);
+    /* Feed age is the newest sounding, not the first entry's: stations that
+     * stopped reporting stay in the list (one has not updated since 2015) and
+     * the order is not by time, so the first entry is routinely months old. */
+    {
+        time_t newest = 0;
+        cJSON *it;
+        cJSON_ArrayForEach(it, root) {
+            cJSON *t = cJSON_GetObjectItem(it, "time");
+            if (!t || !cJSON_IsString(t)) continue;
+            time_t st = parse_utc_timestamp(t->valuestring);
+            if (st > newest) newest = st;
+        }
+        m->ts = newest;
     }
 
     cJSON *item;
@@ -1304,30 +1364,40 @@ void geomag_init(GeomagIndices *g)
 
 int geomag_parse_kp(const char *json_str, GeomagIndices *g)
 {
-    /* Format: array of arrays, first row is header, last row is most recent.
-     * Each row: ["time_tag", "Kp", "a_running", "station_count"] */
+    /* Two shapes, most recent entry last in both:
+     *   new: [{"time_tag": "...", "Kp": 2.33, ...}, ...]
+     *   old: [["time_tag","Kp",...], ["...", "2.33", ...], ...] (header row) */
+    static const char *const kp_keys[] = { "Kp", "kp_index", "kp" };
+    static const char *const ts_keys[] = { "time_tag" };
+
     cJSON *root = cJSON_Parse(json_str);
     if (!root || !cJSON_IsArray(root)) { cJSON_Delete(root); return -1; }
 
     int n = cJSON_GetArraySize(root);
-    if (n < 2) { cJSON_Delete(root); return -1; } /* need header + at least 1 data row */
+    cJSON *last = n > 0 ? cJSON_GetArrayItem(root, n - 1) : NULL;
+    if (!last) { cJSON_Delete(root); return -1; }
 
-    /* Last entry is the most recent */
-    cJSON *last = cJSON_GetArrayItem(root, n - 1);
-    if (!last || !cJSON_IsArray(last) || cJSON_GetArraySize(last) < 2) {
+    if (cJSON_IsObject(last)) {
+        double kp;
+        if (!json_number(last, kp_keys, 3, &kp)) { cJSON_Delete(root); return -1; }
+        g->kp = (float)kp;
+        g->ts_kp = json_time(last, ts_keys, 1);
+    } else if (cJSON_IsArray(last) && cJSON_GetArraySize(last) >= 2) {
+        if (n < 2) { cJSON_Delete(root); return -1; } /* header row only */
+        cJSON *kp_val = cJSON_GetArrayItem(last, 1);
+        if (kp_val && cJSON_IsString(kp_val))
+            g->kp = (float)atof(kp_val->valuestring);
+        else if (kp_val && cJSON_IsNumber(kp_val))
+            g->kp = (float)kp_val->valuedouble;
+        else { cJSON_Delete(root); return -1; }
+
+        cJSON *ts_val = cJSON_GetArrayItem(last, 0);
+        if (ts_val && cJSON_IsString(ts_val))
+            g->ts_kp = parse_utc_timestamp(ts_val->valuestring);
+    } else {
         cJSON_Delete(root);
         return -1;
     }
-
-    cJSON *kp_val = cJSON_GetArrayItem(last, 1);
-    if (kp_val && cJSON_IsString(kp_val))
-        g->kp = (float)atof(kp_val->valuestring);
-    else if (kp_val && cJSON_IsNumber(kp_val))
-        g->kp = (float)kp_val->valuedouble;
-
-    cJSON *ts_val = cJSON_GetArrayItem(last, 0);
-    if (ts_val && cJSON_IsString(ts_val))
-        g->ts_kp = parse_utc_timestamp(ts_val->valuestring);
 
     g->valid = 1;
     cJSON_Delete(root);
@@ -1336,20 +1406,20 @@ int geomag_parse_kp(const char *json_str, GeomagIndices *g)
 
 int geomag_parse_bz(const char *json_str, GeomagIndices *g)
 {
-    /* Format: {"Bt": "5", "Bz": "-2", "TimeStamp": "..."} */
+    /* new: [{"bt": 5, "bz_gsm": 0, "time_tag": "..."}]
+     * old: {"Bt": "5", "Bz": "-2", "TimeStamp": "..."} */
+    static const char *const bz_keys[] = { "bz_gsm", "Bz" };
+    static const char *const ts_keys[] = { "time_tag", "TimeStamp" };
+
     cJSON *root = cJSON_Parse(json_str);
     if (!root) return -1;
 
-    cJSON *bz_val = cJSON_GetObjectItem(root, "Bz");
-    if (bz_val && cJSON_IsString(bz_val))
-        g->bz = (float)atof(bz_val->valuestring);
-    else if (bz_val && cJSON_IsNumber(bz_val))
-        g->bz = (float)bz_val->valuedouble;
+    cJSON *o = json_last_object(root);
+    double bz;
+    if (!o || !json_number(o, bz_keys, 2, &bz)) { cJSON_Delete(root); return -1; }
 
-    cJSON *ts = cJSON_GetObjectItem(root, "TimeStamp");
-    if (ts && cJSON_IsString(ts))
-        g->ts_bz = parse_utc_timestamp(ts->valuestring);
-
+    g->bz = (float)bz;
+    g->ts_bz = json_time(o, ts_keys, 2);
     g->valid = 1;
     cJSON_Delete(root);
     return 0;
@@ -1401,20 +1471,20 @@ int solar_parse_text(const char *text, SolarIndices *s)
 
 int sfu_parse_json(const char *json_str, SolarIndices *s)
 {
-    /* Format: {"Flux":"120","TimeStamp":"2026-03-13 20:00:00"} */
+    /* new: [{"flux": 107, "time_tag": "..."}]
+     * old: {"Flux": "120", "TimeStamp": "..."} */
+    static const char *const flux_keys[] = { "flux", "Flux" };
+    static const char *const ts_keys[]   = { "time_tag", "TimeStamp" };
+
     cJSON *root = cJSON_Parse(json_str);
     if (!root) return -1;
 
-    cJSON *flux = cJSON_GetObjectItem(root, "Flux");
-    if (flux && cJSON_IsString(flux) && flux->valuestring)
-        s->sfu = atoi(flux->valuestring);
-    else if (flux && cJSON_IsNumber(flux))
-        s->sfu = (int)flux->valuedouble;
+    cJSON *o = json_last_object(root);
+    double flux;
+    if (!o || !json_number(o, flux_keys, 2, &flux)) { cJSON_Delete(root); return -1; }
 
-    cJSON *ts = cJSON_GetObjectItem(root, "TimeStamp");
-    if (ts && cJSON_IsString(ts))
-        s->ts_sfu = parse_utc_timestamp(ts->valuestring);
-
+    s->sfu = (int)flux;
+    s->ts_sfu = json_time(o, ts_keys, 2);
     s->valid = 1;
     cJSON_Delete(root);
     return 0;
@@ -1470,20 +1540,20 @@ void solarwind_init(SolarWind *w)
 
 int solarwind_parse_json(const char *json_str, SolarWind *w)
 {
-    /* Format: {"WindSpeed":"675","TimeStamp":"2026-03-14 17:58:00.000"} */
+    /* new: [{"proton_speed": 530, "time_tag": "..."}]
+     * old: {"WindSpeed": "675", "TimeStamp": "..."} */
+    static const char *const speed_keys[] = { "proton_speed", "WindSpeed" };
+    static const char *const ts_keys[]    = { "time_tag", "TimeStamp" };
+
     cJSON *root = cJSON_Parse(json_str);
     if (!root) return -1;
 
-    cJSON *ws = cJSON_GetObjectItem(root, "WindSpeed");
-    if (ws && cJSON_IsString(ws) && ws->valuestring)
-        w->speed = atoi(ws->valuestring);
-    else if (ws && cJSON_IsNumber(ws))
-        w->speed = (int)ws->valuedouble;
+    cJSON *o = json_last_object(root);
+    double speed;
+    if (!o || !json_number(o, speed_keys, 2, &speed)) { cJSON_Delete(root); return -1; }
 
-    cJSON *ts = cJSON_GetObjectItem(root, "TimeStamp");
-    if (ts && cJSON_IsString(ts))
-        w->ts = parse_utc_timestamp(ts->valuestring);
-
+    w->speed = (int)speed;
+    w->ts = json_time(o, ts_keys, 2);
     w->valid = (w->speed > 0);
     cJSON_Delete(root);
     return w->valid ? 0 : -1;
