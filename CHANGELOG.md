@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.4 — 2026-09-16
+
+### Changed
+
+- The Sporadic E overlay now ignores ionosonde soundings older than 3 hours
+  (`SPORE_MAX_AGE_SEC`). Stations that stop reporting stay in the upstream feed
+  indefinitely — the oldest reading currently carried dates to 2015 — and an
+  hours-old sounding interpolated next to a live one is worse than no reading
+  at all. Measured against the live feed, only 8 of the 40 stations with a foEs
+  value are current, and roughly three quarters of the contour area previously
+  drawn came from stale soundings. Stations whose timestamp does not parse are
+  dropped rather than trusted
+
 ## v0.2.3 — 2026-09-16
 
 ### Fixed

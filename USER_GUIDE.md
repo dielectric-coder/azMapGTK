@@ -127,7 +127,7 @@ non-modal — the map stays usable behind it — and closes with **H**, **Esc**,
 | Button | Action |
 |--------|--------|
 | Aurora | Toggle NOAA OVATION aurora oval overlay |
-| E's | Toggle Sporadic E (foEs) contour overlay |
+| E's | Toggle Sporadic E (foEs) contour overlay. Only ionosonde soundings from the last 3 hours are used — stations that have stopped reporting stay in the upstream feed indefinitely |
 | MUF | Toggle Maximum Usable Frequency contour overlay |
 | DRAP | Toggle D-Region Absorption Prediction overlay |
 | Beacons | Toggle NCDXF/IARU beacon display |

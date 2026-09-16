@@ -370,6 +370,11 @@ void muf_reproject(MufData *m)
 #define SPORE_GRID_ROWS  91   /* -90 to +90 in 2° steps */
 #define SPORE_MAX_STATIONS 200
 #define SPORE_MAX_RADIUS_KM 2500.0
+/* Ionosondes that stop reporting stay in the feed indefinitely — some
+ * entries are years old — and sporadic E shifts over minutes, so an old
+ * sounding interpolated next to a live one is worse than no reading at
+ * all. Only soundings this recent feed the grid. */
+#define SPORE_MAX_AGE_SEC (3 * 3600)
 
 /* Contour levels and colors for foEs */
 static const float spore_levels[] = { 3.0f, 5.0f, 7.0f, 10.0f, 14.0f };
@@ -488,12 +493,20 @@ int spore_parse_json(const char *json_str, MufData *m)
         m->ts = newest;
     }
 
+    time_t cutoff = time(NULL) - SPORE_MAX_AGE_SEC;
+
     cJSON *item;
     cJSON_ArrayForEach(item, root) {
         if (nsta >= SPORE_MAX_STATIONS) break;
         cJSON *foes = cJSON_GetObjectItem(item, "foes");
         if (!foes || cJSON_IsNull(foes) || !cJSON_IsNumber(foes)) continue;
         if (foes->valuedouble <= 0.0) continue;
+
+        /* Drop stale soundings — a station with no reading in hours is not
+         * evidence of anything current. An unparseable time is dropped too. */
+        cJSON *stime = cJSON_GetObjectItem(item, "time");
+        if (!stime || !cJSON_IsString(stime)) continue;
+        if (parse_utc_timestamp(stime->valuestring) < cutoff) continue;
 
         /* lat/lon are inside nested "station" object, as strings, lon in 0-360 */
         cJSON *station = cJSON_GetObjectItem(item, "station");
