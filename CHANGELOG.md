@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.2 — 2026-09-16
+
+### Added
+
+- Shortcut reference window, toggled with `h` — lists the mouse and keyboard
+  controls on screen. Non-modal, so the map stays usable behind it; closes with
+  `h`, `Esc`, `q`, or its close button. Lives in the new `help.c`, styled by the
+  `.help-window` rules in the application stylesheet rather than by the theme
+  (`GtkShortcutsWindow`, the stock widget for this, is deprecated since GTK 4.18)
+
 ## v0.2.1 — 2026-09-16
 
 ### Fixed

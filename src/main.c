@@ -1768,6 +1768,11 @@ static void load_css(void)
         "popover entry { background-image: none; background-color: #1a1a2e; "
         "  color: #ddeeff; border: 1px solid #334; box-shadow: none; }"
         ".map-area { background-color: #0d0d1e; margin: 8px; }"
+        ".help-window { background-color: #10101a; }"
+        ".help-window label { font-family: monospace; font-size: 12px; color: #b3cce6; }"
+        ".help-window .help-section { font-size: 11px; color: #667788; margin-top: 10px; margin-bottom: 2px; }"
+        ".help-window .help-key { color: #ddeeff; font-weight: bold; }"
+        ".help-window .help-hint { font-size: 10px; color: #667788; }"
     );
     gtk_style_context_add_provider_for_display(
         gdk_display_get_default(),

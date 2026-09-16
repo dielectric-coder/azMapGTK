@@ -23,6 +23,7 @@
 
 #include <math.h>
 #include "input.h"
+#include "help.h"
 #include "projection.h"
 
 #define EARTH_R 6371.0
@@ -190,6 +191,13 @@ static gboolean on_key_pressed(GtkEventControllerKey *ctrl,
         if (is->swap_cb)
             is->swap_cb(is, is->swap_cb_data);
         return TRUE;
+    case GDK_KEY_h:
+    case GDK_KEY_H: {
+        GtkRoot *root = gtk_widget_get_root(is->gl_area);
+        if (GTK_IS_WINDOW(root))
+            help_toggle(GTK_WINDOW(root));
+        return TRUE;
+    }
     case GDK_KEY_q:
     case GDK_KEY_Q:
     case GDK_KEY_Escape: {

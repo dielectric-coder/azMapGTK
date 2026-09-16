@@ -106,7 +106,12 @@ These keys are written automatically on exit and restored on next launch. You ge
 | ↑ / ↓ | Pan camera | Rotate globe | Pan camera |
 | R | Reset view (center + zoom) | Reset view | Reset view |
 | X | Swap source (QTH) ↔ target | Swap | Swap |
+| H | Show/hide the shortcut window | Show/hide | Show/hide |
 | Q / Esc | Quit | Quit | Quit |
+
+The shortcut window opened with **H** lists the same table on screen. It is
+non-modal — the map stays usable behind it — and closes with **H**, **Esc**,
+**Q**, or its own close button.
 
 ### Sidebar Buttons
 
