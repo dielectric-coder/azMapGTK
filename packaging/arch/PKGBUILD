@@ -8,7 +8,7 @@
 # Override the tree with:  AZMAP_SRCROOT=/path/to/azMapGTK makepkg -si
 
 pkgname=azmap-gtk
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc="Azimuthal, orthographic and Mercator map projections for amateur radio (GTK4/OpenGL)"
 arch=('x86_64')

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.1 — 2026-09-16
+
+### Fixed
+
+- Sidebar buttons were unreadable under a light GTK theme — pale blue text on a near-white surface. Two causes: the stock theme paints every button state with a `background-image` gradient, which covers the `background-color` the sidebar CSS sets, and the `.sidebar label` rule also matched a button's own label node, overriding the colour the button hands down. All button states now reset `background-image`, `:active`/`:backdrop`/`:backdrop:checked` carry explicit colours, and button labels inherit from the button
+- The QRZ and TARGET popovers had the same problem: only `.data-popover` was styled, so the others drew theme-coloured backgrounds behind sidebar-blue labels. Popover contents, labels, and entries are now styled generically
+- The app asks for the dark theme variant at startup, so widgets it does not style itself (entries, scrollbars, tooltips) match the dark UI
+
 ## v0.2.0 — 2026-08-05
 
 ### Added

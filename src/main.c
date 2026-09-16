@@ -1726,6 +1726,12 @@ static void on_target_btn_destroy(GtkWidget *widget, gpointer data)
 
 static void load_css(void)
 {
+    /* The UI is designed dark; ask for the dark theme variant so widgets we
+       do not style ourselves (entries, scrollbars, tooltips) match. */
+    GtkSettings *settings = gtk_settings_get_default();
+    if (settings)
+        g_object_set(settings, "gtk-application-prefer-dark-theme", TRUE, NULL);
+
     GtkCssProvider *provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(provider,
         "window { background-color: #0d0d1e; }"
@@ -1734,16 +1740,33 @@ static void load_css(void)
         ".sidebar .clock { font-size: 16px; font-weight: bold; color: #ddeeff; }"
         ".sidebar .section-label { font-size: 11px; color: #667788; margin-top: 8px; }"
         ".sidebar .info-label { font-size: 12px; color: #99bbdd; }"
+        /* The stock theme paints every button state with a background-image
+           gradient, which covers background-color; reset it or the buttons
+           render in theme colours (near-white under a light theme). */
+        ".sidebar button, .sidebar button:hover, .sidebar button:active, "
+        ".sidebar button:checked, .sidebar button:disabled, "
+        ".sidebar button:backdrop, .sidebar button:backdrop:checked { "
+        "  background-image: none; box-shadow: none; }"
         ".sidebar button { "
         "  background-color: #1a1a2e; color: #ccc; border: 1px solid #334; "
         "  border-radius: 6px; padding: 4px 10px; font-size: 11px; "
         "  font-family: monospace; min-height: 24px; }"
         ".sidebar button:hover { background-color: #252540; border-color: #558; }"
-        ".sidebar button:checked { background-color: #2a4570; border-color: #4a7ab5; color: #fff; }"
+        ".sidebar button:active { background-color: #252540; border-color: #558; color: #fff; }"
+        ".sidebar button:backdrop { background-color: #1a1a2e; border-color: #334; color: #ccc; }"
+        ".sidebar button:checked, .sidebar button:backdrop:checked { "
+        "  background-color: #2a4570; border-color: #4a7ab5; color: #fff; }"
+        /* `.sidebar label` above also matches a button's own label node, so
+           the button colour must be handed down explicitly. */
+        ".sidebar button label { color: inherit; font-size: 11px; }"
         ".btn-sep { background-color: #ffffff; min-height: 1px; margin: 6px 0; }"
         ".info-sep { background-color: #667788; min-height: 1px; margin: 6px 0; }"
-        "popover.data-popover > contents { background-color: #10101a; }"
-        "popover.data-popover label { font-family: monospace; font-size: 11px; color: #b3cce6; }"
+        "popover > contents { background-color: #10101a; color: #b3cce6; "
+        "  border: 1px solid #334; }"
+        "popover label { font-family: monospace; color: #b3cce6; }"
+        "popover.data-popover label { font-size: 11px; }"
+        "popover entry { background-image: none; background-color: #1a1a2e; "
+        "  color: #ddeeff; border: 1px solid #334; box-shadow: none; }"
         ".map-area { background-color: #0d0d1e; margin: 8px; }"
     );
     gtk_style_context_add_provider_for_display(
